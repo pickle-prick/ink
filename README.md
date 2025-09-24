@@ -1,7 +1,7 @@
 ink / A Native Whiteboard App
 ============
 
-![demo](./screenshot/0.png)
+![demo](./screenshot/1.png)
 
 
 Source code is available in another repo(github.com/pickle-prick/rubik) and will be merged into this repository in the future
