@@ -12,4 +12,6 @@ Built with C and Vulkan, so a decent performance should be expected
 
 Currently only Linux_x64 and Win_x64 are supported (check the Releases page for downloads)
 
+Join discrod https://discord.gg/6tzEKgKG for bug report or feature suggestions (or you can just create a issue)
+
 Any issues/suggestions are appreciated
