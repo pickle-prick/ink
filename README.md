@@ -15,3 +15,10 @@ Currently only Linux_x64 and Win_x64 are supported (check the Releases page for 
 Join discrod https://discord.gg/6tzEKgKG for bug report or feature suggestions (or you can just create a issue)
 
 Any issues/suggestions are appreciated
+
+Some known issues:
+* bad tablet support (I need to buy a tablet)
+* crashes on window resizing (in some cases)
+* can't copy/paste element
+* no redo/undo
+* crashes on startup (in some cases)
