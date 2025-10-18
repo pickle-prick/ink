@@ -1,0 +1,3 @@
+[submodule "simp"]
+	path = simp
+	url = git@github.com:pickle-prick/simp.git
