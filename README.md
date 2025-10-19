@@ -6,7 +6,6 @@ ink / A Native Whiteboard App
 
 > [!WARNING]
 > This software is not finished, expect missing features and bugs
-> Built with C and Vulkan, so a decent performance should be expected
 
 ## Development Setup Instructions
 
