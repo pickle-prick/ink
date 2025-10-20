@@ -44,13 +44,13 @@ if "%asan%"=="1"    set auto_compile_flags=%auto_compile_flags% -fsanitize=addre
 set cl_common=     /I..\src\ /I..\simp\ /I..\local\ /I"%VULKAN_SDK%\Include" /nologo /FC /Z7
 set cl_debug=      call cl /Od /Ob1 /DBUILD_DEBUG=1 %cl_common% %auto_compile_flags%
 set cl_release=    call cl /O2 /DBUILD_DEBUG=0 %cl_common% %auto_compile_flags%
-set cl_link=       /link /MANIFEST:EMBED /INCREMENTAL:NO /pdbaltpath:%%%%_PDB%%%% /NATVIS:"%~dp0\src\natvis\base.natvis" /LIBPATH:"%VULKAN_SDK%\Lib" vulkan-1.lib
+set cl_link=       /link /MANIFEST:EMBED /INCREMENTAL:NO /pdbaltpath:%%%%_PDB%%%% /NATVIS:"%~dp0\simp\natvis\base.natvis" /LIBPATH:"%VULKAN_SDK%\Lib" vulkan-1.lib
 set cl_out=        /out:
 set cl_natvis=     /NATVIS:
 set clang_common=  -I..\src\ -I..\simp\ -I..\local\ -I"%VULKAN_SDK%\Include" -gcodeview -fdiagnostics-absolute-paths -Wall -Wno-unknown-warning-option -Wno-missing-braces -Wno-unused-function -Wno-writable-strings -Wno-unused-value -Wno-unused-variable -Wno-unused-local-typedef -Wno-deprecated-register -Wno-deprecated-declarations -Wno-unused-but-set-variable -Wno-single-bit-bitfield-constant-conversion -Wno-compare-distinct-pointer-types -Wno-initializer-overrides -Wno-incompatible-pointer-types-discards-qualifiers -Xclang -flto-visibility-public-std -D_USE_MATH_DEFINES -Dstrdup=_strdup -Dgnu_printf=printf -ferror-limit=10000
 set clang_debug=   call clang -g -O0 -DBUILD_DEBUG=1 %clang_common% %auto_compile_flags%
 set clang_release= call clang -g -O2 -DBUILD_DEBUG=0 %clang_common% %auto_compile_flags%
-set clang_link=    -fuse-ld=lld -Xlinker /MANIFEST:EMBED -Xlinker /pdbaltpath:%%%%_PDB%%%% -Xlinker /NATVIS:"%~dp0\src\natvis\base.natvis" -L "%VULKAN_SDK%\Lib" -lvulkan-1
+set clang_link=    -fuse-ld=lld -Xlinker /MANIFEST:EMBED -Xlinker /pdbaltpath:%%%%_PDB%%%% -Xlinker /NATVIS:"%~dp0\simp\natvis\base.natvis" -L "%VULKAN_SDK%\Lib" -lvulkan-1
 set clang_out=     -o
 set clang_natvis=  -Xlinker /NATVIS:
 
@@ -121,7 +121,7 @@ if not "%no_shader%"=="1" (
 if "%no_meta%"=="1" echo [skipping metagen]
 if not "%no_meta%"=="1" (
   pushd build
-  %compile_debug% ..\src\metagen\metagen_main.c %compile_link% %out%metagen.exe || exit /b 1
+  %compile_debug% ..\simp\metagen\metagen_main.c %compile_link% %out%metagen.exe || exit /b 1
   metagen.exe || exit /b 1
   popd
 )
