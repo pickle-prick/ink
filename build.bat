@@ -139,7 +139,7 @@ if not "%no_meta%"=="1" (
 
 :: --- Build Everything (@build_targets) --------------------------------------
 pushd build
-if "%ink%"=="1"    set didbuild=1 && %compile% ..\src\ink_main.c      %compile_link% %link_icon% %out%ink.exe   || exit /b 1
+if "%ink%"=="1"    set didbuild=1 && %compile% ..\src\ink\ink_main.c      %compile_link% %link_icon% %out%ink.exe   || exit /b 1
 popd
 
 :: --- Warn On No Builds ------------------------------------------------------

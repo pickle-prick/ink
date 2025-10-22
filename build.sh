@@ -104,7 +104,7 @@ fi
 
 # --- Build Everything (@build_targets) ---------------------------------------
 cd build
-if [ -v ink ];   then didbuild=1 && $compile ../src/ink_main.c      $compile_link $link_os_gfx $link_render $link_os_audio $link_font_provider $out ink;   fi
+if [ -v ink ];   then didbuild=1 && $compile ../src/ink/ink_main.c      $compile_link $link_os_gfx $link_render $link_os_audio $link_font_provider $out ink;   fi
 cd ..
 
 # --- Warn On No Builds -------------------------------------------------------
