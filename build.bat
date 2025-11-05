@@ -122,7 +122,8 @@ if "%no_meta%"=="1" echo [skipping metagen]
 if not "%no_meta%"=="1" (
   pushd build
   %compile_debug% ..\simp\metagen\metagen_main.c %compile_link% %out%metagen.exe || exit /b 1
-  metagen.exe || exit /b 1
+  metagen.exe src || exit /b 1
+  metagen.exe simp || exit /b 1
   popd
 )
 

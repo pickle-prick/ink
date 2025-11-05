@@ -57,7 +57,8 @@ if [ ! -v no_meta ]
 then
   cd build
   $compile_debug ../simp/metagen/metagen_main.c $compile_link $out metagen
-  ./metagen
+  ./metagen src
+  ./metagen simp
   cd ..
 fi
 
