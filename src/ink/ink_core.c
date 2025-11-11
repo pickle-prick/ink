@@ -3835,7 +3835,7 @@ IK_BOX_UPDATE(stroke)
 IK_BOX_DRAW(stroke)
 {
   F32 base_stroke_size = box->stroke_size;
-  F32 min_visiable_stroke_size = (0.5*ik_state->dpi/96.f) * ik_state->world_to_screen_ratio.x;
+  F32 min_visiable_stroke_size = (2*ik_state->dpi/96.f) * ik_state->world_to_screen_ratio.x;
 
   IK_Point *p0 = box->first_point;
   IK_Point *p1 = p0 ? p0->next : 0;
@@ -3856,7 +3856,7 @@ IK_BOX_DRAW(stroke)
     // scale stroke size based on dist, mimic ink pen effect
     F32 dist = length_2f32(sub_2f32(m1, m2));
     F32 t = round_f32(dist/base_stroke_size);
-    F32 scale = mix_1f32(1.0, 0.15, t/2.0);
+    F32 scale = mix_1f32(1.0, 0.85, t/2.0);
     scale = last_scale*0.9+0.1*scale;
     last_scale = scale;
     F32 stroke_size = base_stroke_size*scale;
