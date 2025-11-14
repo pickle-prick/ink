@@ -448,7 +448,7 @@ typedef struct IK_Frame IK_Frame;
 struct IK_Box
 {
   IK_Key key;
-  Vec2F32 key_2f32;
+  Vec3F32 key_3f32;
   IK_Frame *frame;
 
   // Lookup table links
@@ -868,8 +868,8 @@ internal inline B32 ik_key_match(IK_Key a, IK_Key b);
 internal inline IK_Key ik_key_make(U64 a, U64 b);
 internal inline IK_Key ik_key_zero();
 internal IK_Key ik_key_new();
-internal Vec2F32 ik_2f32_from_key(IK_Key key);
-internal IK_Key ik_key_from_2f32(Vec2F32 key_2f32);
+internal Vec3F32 ik_3f32_from_key(IK_Key key);
+internal IK_Key ik_key_from_3f32(Vec3F32 key_3f32);
 
 /////////////////////////////////
 //~ Handle

@@ -109,9 +109,14 @@ if not "%no_shader%"=="1" (
 
         :: Remove the leading dot from the extension
         set "extension=!extension:~1!"
+        set "spv_out=!shader_out_dir!\!name!_!extension!.spv"
+        set "header_out=!shader_out_dir!\!name!_!extension!.spv.h"
 
-        echo Compiling !shader! to !shader_out_dir!\!name!_!extension!.spv
-        glslc "!shader!" -o "!shader_out_dir!\!name!_!extension!.spv"
+        echo Compiling !shader! to !spv_out!
+        glslc "!shader!" -o "!spv_out!"
+
+        echo Embedding !spv_out! to !header_out!
+        xxd -i -n "!name!_!extension!_spv" "!spv_out!" > "!header_out!"
       )
     )
   )

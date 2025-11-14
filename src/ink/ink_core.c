@@ -529,23 +529,34 @@ ik_key_new()
   return ret;
 }
 
-internal Vec2F32
+internal Vec3F32
 ik_2f32_from_key(IK_Key key)
 {
+#if 0
   U32 high = (key.u64[0]>>32);
   U32 low = key.u64[0];
   Vec2F32 ret = {*((F32*)&high), *((F32*)&low)};
   // FIXME: vulkan could drop subnormal number (< 1.0e-39) to 0
   // https://stackoverflow.com/questions/73498522/writing-small-floats-to-fbo-in-vulkan
   return ret;
+#endif
+
+  // 64-bit into 3 f32
+  // R = top 24 bits, G = middle 24 bits, B = lower 16 bits
+  F32 r = (F32)((key.u64[0]>>40) & 0xFFFFFFu);
+  F32 g = (F32)((key.u64[0]>>16) & 0xFFFFFFu);
+  F32 b = (F32)((key.u64[0]>>0)  & 0xFFFFFFu);
+  Vec3F32 ret = {r,g,b};
+  return ret;
 }
 
 internal IK_Key
-ik_key_from_2f32(Vec2F32 key_2f32)
+ik_key_from_3f32(Vec3F32 key_3f32)
 {
-  U32 high = *((U32*)(&key_2f32.x));
-  U32 low = *((U32*)(&key_2f32.y));
-  U64 key = ((U64)high<<32) | ((U64)low);
+  U64 r = (U64)key_3f32.x;
+  U64 g = (U64)key_3f32.y;
+  U64 b = (U64)key_3f32.z;
+  U64 key = (r<<40) | (g<<16) | b;
   IK_Key ret = {key, 0};
   return ret;
 }
@@ -2127,7 +2138,7 @@ ik_frame(void)
       U32 src = 0x660B05FF;
       // U32 src = 0x8C1007FF;
       Vec4F32 clr = linear_from_srgba(rgba_from_u32(src));
-      dr_rect_keyed(rect, clr, 0,0,0, frame->blank->key_2f32);
+      dr_rect_keyed(rect, clr, 0,0,0, frame->blank->key_3f32);
     }
 
     /////////////////////////////////
@@ -2175,7 +2186,7 @@ ik_frame(void)
           // draw rect background
           if(box->flags & IK_BoxFlag_DrawBackground && !zero_dim)
           {
-            dr_rect_keyed(dst, box->background_color, 0, 0, 0, box->key_2f32);
+            dr_rect_keyed(dst, box->background_color, 0, 0, 0, box->key_3f32);
           }
           
           // draw image
@@ -2209,7 +2220,7 @@ ik_frame(void)
             if(image->loaded)
             {
               Rng2F32 src = {0,0, box->image->x, box->image->y};
-              dr_img_keyed(dst, src, box->image->handle, v4f32(1,1,1,1), 0, 0, 0, box->key_2f32);
+              dr_img_keyed(dst, src, box->image->handle, v4f32(1,1,1,1), 0, 0, 0, box->key_3f32);
             }
           }
 
@@ -2235,7 +2246,7 @@ ik_frame(void)
           if(box->flags & IK_BoxFlag_DrawBorder && !zero_dim)
           {
             F32 border_thickness = 1.5 * ik_state->world_to_screen_ratio.x;
-            R_Rect2DInst *inst = dr_rect_keyed(pad_2f32(dst, 2*border_thickness), box->border_color, 0, border_thickness, border_thickness/2.0, box->key_2f32);
+            R_Rect2DInst *inst = dr_rect_keyed(pad_2f32(dst, 2*border_thickness), box->border_color, 0, border_thickness, border_thickness/2.0, box->key_3f32);
           }
 
           if(box->flags & IK_BoxFlag_DrawHotEffects)
@@ -2247,7 +2258,7 @@ ik_frame(void)
             }
 
             F32 t = box->hot_t * (1.f-effective_active_t);
-            R_Rect2DInst *inst = dr_rect_keyed(dst, v4f32(0, 0, 0, 0), 0, 0, 1.f, box->key_2f32);
+            R_Rect2DInst *inst = dr_rect_keyed(dst, v4f32(0, 0, 0, 0), 0, 0, 1.f, box->key_3f32);
             Vec4F32 color = ik_rgba_from_theme_color(IK_ThemeColor_Hover);
             color.w *= t*0.1f;
             inst->colors[Corner_00] = color;
@@ -2262,15 +2273,15 @@ ik_frame(void)
           // draw selection highlight
           if(box->sig.f & IK_SignalFlag_Select && !zero_dim)
           {
-            dr_rect_keyed(pad_2f32(dst, 0*ik_state->world_to_screen_ratio.x), v4f32(1,1,0,0.1), 0, 0, 0, box->key_2f32);
+            dr_rect_keyed(pad_2f32(dst, 0*ik_state->world_to_screen_ratio.x), v4f32(1,1,0,0.1), 0, 0, 0, box->key_3f32);
             F32 border_thickness = 3*ik_state->world_to_screen_ratio.x;
-            dr_rect_keyed(pad_2f32(dst, border_thickness*2), v4f32(0.1,0,1,1), 0, border_thickness, 0, box->key_2f32);
+            dr_rect_keyed(pad_2f32(dst, border_thickness*2), v4f32(0.1,0,1,1), 0, border_thickness, 0, box->key_3f32);
           }
 
           // draw key overlay
           if(box->flags & IK_BoxFlag_DrawKeyOverlay)
           {
-            dr_rect_keyed(dst, v4f32(0,0,0,0), 0, 0, 0, box->key_2f32);
+            dr_rect_keyed(dst, v4f32(0,0,0,0), 0, 0, 0, box->key_3f32);
           }
         }
       }
@@ -2283,7 +2294,7 @@ ik_frame(void)
       if(b)
       {
         Rng2F32 dst = ik_rect_from_box(b);
-        dr_rect_keyed(dst, v4f32(0,0,0,0), 0, 0, 0, b->key_2f32);
+        dr_rect_keyed(dst, v4f32(0,0,0,0), 0, 0, 0, b->key_3f32);
       }
     }
 
@@ -2348,8 +2359,8 @@ ik_frame(void)
       }
       dr_submit_bucket(ik_state->os_wnd, ik_state->r_wnd, ik_state->bucket_ui);
     }
-    Vec2F32 key_2f32 = r_window_end_frame(ik_state->os_wnd, ik_state->r_wnd, ik_state->mouse);
-    ik_state->pixel_hot_key = ik_key_from_2f32(key_2f32);
+    Vec3F32 key_3f32 = r_window_end_frame(ik_state->os_wnd, ik_state->r_wnd, ik_state->mouse);
+    ik_state->pixel_hot_key = ik_key_from_3f32(key_3f32);
     r_end_frame();
   }
 
@@ -3028,7 +3039,7 @@ ik_build_box_from_key_(IK_BoxFlags flags, IK_Key key, B32 pre_order)
   IK_Palette *palette = ik_top_palette();
   // fill box info
   box->key = key;
-  box->key_2f32 = ik_2f32_from_key(key);
+  box->key_3f32 = ik_2f32_from_key(key);
   box->flags = flags;
   box->frame = frame;
   box->font_size = ik_top_font_size();
@@ -3662,7 +3673,7 @@ IK_BOX_DRAW(text)
     // NOTE(k): we have \n run which is not renderable, and it will cutoff grouping continuation 
     if(!r_handle_match(r_handle_zero(), text_rect->tex))
     {
-      dr_img_keyed(text_rect->dst, text_rect->src, text_rect->tex, text_rect->color, 0,0,0, box->key_2f32);
+      dr_img_keyed(text_rect->dst, text_rect->src, text_rect->tex, text_rect->color, 0,0,0, box->key_3f32);
     }
     // dr_rect(text_rect->dst, v4f32(1,0,0,0.5), 0,1,0);
 
@@ -3888,7 +3899,7 @@ IK_BOX_DRAW(stroke)
 #if 1
         if(length_2f32(sub_2f32(prev, pt)) > 1e-8)
         {
-          dr_line_keyed(prev, pt, stroke_color, stroke_size, edge_softness, box->key_2f32);
+          dr_line_keyed(prev, pt, stroke_color, stroke_size, edge_softness, box->key_3f32);
         }
 #else
         F32 half_stroke_size = stroke_size/2.0;
@@ -4018,14 +4029,14 @@ IK_BOX_DRAW(arrow)
   {
     Rng2F32 rect = {.p0 = a, .p1 = a};
     rect = pad_2f32(rect, half_stroke_size*1.3);
-    dr_rect_keyed(rect, stroke_clr, half_stroke_size*1.3, 0, edge_softness, box->key_2f32);
+    dr_rect_keyed(rect, stroke_clr, half_stroke_size*1.3, 0, edge_softness, box->key_3f32);
   }
 
   // draw b with arrow
   {
     Rng2F32 rect = {.p0 = b, .p1 = b};
     rect = pad_2f32(rect, half_stroke_size*1.3);
-    dr_rect_keyed(rect, stroke_clr, half_stroke_size*1.3, 0, edge_softness, box->key_2f32);
+    dr_rect_keyed(rect, stroke_clr, half_stroke_size*1.3, 0, edge_softness, box->key_3f32);
 
     // draw arrow direction
     Vec2F32 dir = normalize_2f32(sub_2f32(b, c));
@@ -4040,7 +4051,7 @@ IK_BOX_DRAW(arrow)
       dir_inv.x*sin_f32(angle_turns)+dir_inv.y*cos_f32(angle_turns)
     };
     Vec2F32 up_end = add_2f32(b, scale_2f32(up, arrow_length));
-    R_Rect2DInst *inst =  dr_line_keyed(b, up_end, stroke_clr, stroke_size, edge_softness, box->key_2f32);
+    R_Rect2DInst *inst =  dr_line_keyed(b, up_end, stroke_clr, stroke_size, edge_softness, box->key_3f32);
 
     // down
     Vec2F32 down = 
@@ -4049,7 +4060,7 @@ IK_BOX_DRAW(arrow)
       dir_inv.x*sin_f32(-angle_turns)+dir_inv.y*cos_f32(-angle_turns)
     };
     Vec2F32 down_end = add_2f32(b, scale_2f32(down, arrow_length));
-    dr_line_keyed(b, down_end, stroke_clr, stroke_size, edge_softness, box->key_2f32);
+    dr_line_keyed(b, down_end, stroke_clr, stroke_size, edge_softness, box->key_3f32);
   }
 
   // draw a line between a and b, m as control point
@@ -4079,7 +4090,7 @@ IK_BOX_DRAW(arrow)
       };
 
       // draw line segment (prev → pt) with thickness
-      dr_line_keyed(prev, pt, stroke_clr, scaled_stroke_size, edge_softness, box->key_2f32);
+      dr_line_keyed(prev, pt, stroke_clr, scaled_stroke_size, edge_softness, box->key_3f32);
       prev = pt;
     }
   }
