@@ -2368,20 +2368,22 @@ ik_frame(void)
   //~ Wait if we still have some cpu time left
 
   U64 frame_time_target_cap_us = (U64)(1000000/target_hz);
-  U64 woik_us = os_now_microseconds()-begin_time_us;
-  ik_state->cpu_time_us = woik_us;
-  if(woik_us < frame_time_target_cap_us)
+  U64 work_us = os_now_microseconds()-begin_time_us;
+  ik_state->cpu_time_us = work_us;
+  if(work_us < frame_time_target_cap_us)
   {
     ProfScope("wait frame target cap")
     {
-      while(woik_us < frame_time_target_cap_us)
+      while(work_us < frame_time_target_cap_us)
       {
         // TODO: check if os supports ms granular sleep
-        if(1)
+        B32 granular_sleep = 1;
+        U64 remain_ms = (frame_time_target_cap_us-work_us)/1000;
+        if(granular_sleep && remain_ms > 2000)
         {
-          os_sleep_milliseconds((frame_time_target_cap_us-woik_us)/1000);
+          os_sleep_milliseconds(remain_ms-1000);
         }
-        woik_us = os_now_microseconds()-begin_time_us;
+        work_us = os_now_microseconds()-begin_time_us;
       }
     }
   }
@@ -2389,7 +2391,7 @@ ik_frame(void)
   {
     // Missed frame rate!
     // TODO(k): proper logging
-    fprintf(stderr, "missed frame, over %06.2f ms from %06.2f ms\n", (woik_us-frame_time_target_cap_us)/1000.0, frame_time_target_cap_us/1000.0);
+    fprintf(stderr, "missed frame, over %06.2f ms from %06.2f ms\n", (work_us-frame_time_target_cap_us)/1000.0, frame_time_target_cap_us/1000.0);
     // TODO(k): not sure why spall why not flushing if we stopped to early, maybe there is a limit for flushing
 
     // tag it
