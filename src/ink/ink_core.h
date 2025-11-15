@@ -801,6 +801,8 @@ struct IK_State
   IK_Box                *last_box_selected;
   Rng2F32               selection_bounds;
   U64                   selected_box_count;
+  // clipboard
+  IK_Key                last_box_key_copied;
 
   // toolbar
   IK_ToolKind           tool;
@@ -928,10 +930,15 @@ internal String8 ik_get_drag_data(U64 min_required_size);
 internal inline B32 ik_is_selecting(void);
 
 /////////////////////////////////
+//~ Clipboard Functions
+
+internal B32 ik_paste();
+
+/////////////////////////////////
 //~ OS event consumption helpers
 
-internal B32 ik_paste(void);
-internal B32 ik_copy(void);
+internal B32 ik_pasted(void);
+internal B32 ik_copied(void);
 internal String8List ik_file_drop(Vec2F32 *return_mouse);
 // TODO(k): for now, we just reuse the ui eat consumption helpers, since we are using the same event list
 // internal void ik_eat_event_node(UI_EventList *list, UI_EventNode *node);
@@ -989,6 +996,7 @@ internal IK_Box* ik_build_box_from_key_(UI_BoxFlags flags, IK_Key key, B32 pre_o
 internal IK_Key  ik_active_seed_key(void);
 internal IK_Box* ik_build_box_from_string(IK_BoxFlags flags, String8 string);
 internal IK_Box* ik_build_box_from_stringf(IK_BoxFlags flags, char *fmt, ...);
+internal IK_Box* ik_box_clone(IK_Box *src);
 
 //- box node destruction
 internal void ik_box_release(IK_Box *box);

@@ -1978,65 +1978,20 @@ ik_frame(void)
       }
     }
 
-    //- paste text/image
-    if(ik_paste())
+    //- copy box
+    if(ik_copied())
     {
-      Temp scratch = scratch_begin(0,0);
-
-      // try pasting text first, then image
-      B32 content_is_text = 0;
-      B32 content_is_image = 0;
-      String8 content = os_get_clipboard_text(scratch.arena);
-      content_is_text = content.size > 0;
-      if(!content_is_text)
+      IK_Box *active_box = ik_box_from_key(ik_state->focus_hot_box_key[IK_MouseButtonKind_Left]);
+      if(active_box)
       {
-        content = os_get_clipboard_image(scratch.arena);
-        content_is_image = content.size > 0;
+        // empty system clipboard
+        os_set_clipboard_text(str8_lit(""));
+        ik_state->last_box_key_copied = active_box->key;
       }
-
-      // paste text
-      if(content_is_text)
-      {
-        IK_Box *box = ik_text(content, ik_state->mouse_in_world);
-        box->draw_frame_index = ik_state->frame_index+1;
-        box->disabled_t = 1.0;
-      }
-
-      // paste image
-      if(content_is_image)
-      {
-        // decide initial width&height
-        F32 default_screen_width = ik_state->window_dim.x * 0.25;
-        F32 width = default_screen_width * ik_state->world_to_screen_ratio.x;
-        F32 height = width;
-        F32 ratio = 1.0;
-
-        IK_Key key = ik_key_make(ui_hash_from_string(0, content), 0);
-        IK_Image *image = ik_image_from_key(key);
-        if(!image)
-        {
-          image = ik_image_push(key);
-          image->encoded = ik_push_str8_copy(content);
-          ik_image_decode_queue_push(image);
-        }
-        else
-        {
-          // image cached? -> set height based on ratio
-          // FIXME: bug here, this image could still being decoding
-          ratio = (F32)image->x/image->y;
-          height = width/ratio;
-        }
-
-        // build box
-        IK_Box *box = ik_image(IK_BoxFlag_DrawBorder, ik_state->mouse_in_world, v2f32(width, height), image);
-        box->ratio = ratio;
-        box->disabled_t = 1.0;
-        // TODO(Next): not ideal, fix it later
-        box->draw_frame_index = ik_state->frame_index+1;
-      }
-
-      scratch_end(scratch);
     }
+
+    //- paste text/image/box
+    if(ik_pasted()) ik_paste();
 
     /////////////////////////////////
     //~ Save
@@ -2599,10 +2554,95 @@ ik_is_selecting(void)
 }
 
 /////////////////////////////////
+//~ Clipboard Functions
+
+internal B32
+ik_paste()
+{ 
+  Temp scratch = scratch_begin(0,0);
+
+  // try pasting text first, then image
+  B32 content_is_text = 0;
+  B32 content_is_image = 0;
+  B32 pasted = 0;
+  String8 content = os_get_clipboard_text(scratch.arena);
+  content_is_text = content.size > 0;
+  if(!content_is_text)
+  {
+    content = os_get_clipboard_image(scratch.arena);
+    content_is_image = content.size > 0;
+  }
+
+  // paste text
+  if(content_is_text)
+  {
+    IK_Box *box = ik_text(content, ik_state->mouse_in_world);
+    box->draw_frame_index = ik_state->frame_index+1;
+    box->disabled_t = 1.0;
+    pasted = 1;
+  }
+
+  // paste image
+  if(content_is_image)
+  {
+    // decide initial width&height
+    F32 default_screen_width = ik_state->window_dim.x * 0.25;
+    F32 width = default_screen_width * ik_state->world_to_screen_ratio.x;
+    F32 height = width;
+    F32 ratio = 1.0;
+
+    IK_Key key = ik_key_make(ui_hash_from_string(0, content), 0);
+    IK_Image *image = ik_image_from_key(key);
+    if(!image)
+    {
+      image = ik_image_push(key);
+      image->encoded = ik_push_str8_copy(content);
+      ik_image_decode_queue_push(image);
+    }
+    else
+    {
+      // image cached? -> set height based on ratio
+      // FIXME: bug here, this image could still being decoding
+      ratio = (F32)image->x/image->y;
+      height = width/ratio;
+    }
+
+    // build box
+    IK_Box *box = ik_image(IK_BoxFlag_DrawBorder, ik_state->mouse_in_world, v2f32(width, height), image);
+    box->ratio = ratio;
+    box->disabled_t = 1.0;
+    // TODO(Next): not ideal, fix it later
+    box->draw_frame_index = ik_state->frame_index+1;
+    pasted = 1;
+  }
+
+  // paste box
+  if(!pasted && !ik_key_match(ik_key_zero(), ik_state->last_box_key_copied))
+  {
+    IK_Box *src = ik_box_from_key(ik_state->last_box_key_copied);
+    if(src)
+    {
+      Vec2F32 offset = sub_2f32(ik_state->mouse_in_world, src->position);
+      // FIXME: handle select group box, we need a way to bypass this box
+      IK_Box *dst = ik_box_clone(src);
+      ik_box_do_translate(dst, offset);
+      dst->disabled_t = 1.0;
+      ik_kill_action();
+      ik_kill_focus();
+      ik_state->focus_hot_box_key[IK_MouseButtonKind_Left] = dst->key;
+      pasted = 1;
+    }
+  }
+
+  scratch_end(scratch);
+  return pasted;
+}
+
+/////////////////////////////////
 //~ OS event consumption helpers
 
 internal B32
-ik_paste(void)
+ik_pasted(void)
 {
   B32 ret = 0;
   for(UI_EventNode *n = ik_state->events->first, *next = 0; n != 0; n = next)
@@ -2623,7 +2663,7 @@ ik_paste(void)
 }
 
 internal B32
-ik_copy(void)
+ik_copied(void)
 {
   B32 ret = 0;
   for(UI_EventNode *n = ik_state->events->first, *next = 0; n != 0; n = next)
@@ -2828,10 +2868,14 @@ ik_drawlist_push_rect(Arena *arena, IK_DrawList *drawlist, Rng2F32 dst, Rng2F32 
 internal String8
 ik_push_str8_copy(String8 src)
 {
-  String8 ret = ik_str8_new(src.size+1); // NOTE: add 1 for null terminator
-  MemoryCopy(ret.str, src.str, src.size);
-  ret.size = src.size;
-  ret.str[ret.size] = '\0';
+  String8 ret = {0};
+  if(src.size > 0)
+  {
+    ret = ik_str8_new(src.size+1); // NOTE: add 1 for null terminator
+    MemoryCopy(ret.str, src.str, src.size);
+    ret.size = src.size;
+    ret.str[ret.size] = '\0';
+  }
   return ret;
 }
 
@@ -3106,6 +3150,63 @@ ik_build_box_from_stringf(IK_BoxFlags flags, char *fmt, ...)
   IK_Box *box = ik_build_box_from_string(flags, string);
   scratch_end(scratch);
   return box;
+}
+
+internal IK_Box *
+ik_box_clone(IK_Box *src)
+{
+  Temp scratch = scratch_begin(0,0);
+  IK_BoxFlags flags = src->flags;
+  String8 src_name = ik_display_part_from_key_string(src->name);
+  String8 dst_name = push_str8f(scratch.arena, "%S###%I64u", src_name, os_now_microseconds());
+  IK_Box *ret = ik_build_box_from_string(flags, dst_name);
+
+  // fill info
+  ret->position          = src->position;
+  ret->rotation          = src->rotation;
+  ret->rect_size         = src->rect_size;
+  ret->last_rect_size    = src->last_rect_size;
+  ret->background_color  = src->background_color;
+  ret->text_color        = src->text_color;
+  ret->border_color      = src->border_color;
+  ret->ratio             = src->ratio;
+  ret->hover_cursor      = src->hover_cursor;
+  ret->transparency      = src->transparency;
+  ret->stroke_size       = src->stroke_size;
+  ret->stroke_color      = src->stroke_color;
+  ret->image             = src->image;
+  if(ret->image) ret->image->rc++;
+  // string
+  ret->string            = ik_push_str8_copy(src->string);
+  ret->font_slot         = src->font_slot;
+  ret->font_size         = src->font_size;
+  ret->tab_size          = src->tab_size;
+  ret->text_raster_flags = src->text_raster_flags;
+  ret->text_padding      = src->text_padding;
+  ret->text_align        = src->text_align;
+  // points
+  for(IK_Point *point = src->first_point;
+      point != 0;
+      point = point->next)
+  {
+    IK_Point *dst = ik_point_alloc();
+    dst->position = point->position;
+    DLLPushBack(ret->first_point, ret->last_point, dst);
+    ret->point_count++;
+  }
+
+  // recursive
+  for(IK_Box *c = src->group_first; c != 0; c = c->group_next)
+  {
+    IK_Box *group_child = ik_box_clone(c);
+    DLLPushBack_NP(ret->group_first, ret->group_last, group_child, group_next, group_prev);
+    ret->group_children_count++;
+  }
+
+  ret->draw_frame_index = ik_state->frame_index+1;
+
+  scratch_end(scratch);
+  return ret;
 }
 
 //- box node destruction
@@ -6532,12 +6633,8 @@ ik_ui_box_ctx_menu(void)
         B32 taken = 0;
         if(ui_clicked(ui_buttonf("copy")))
         {
-          ik_message_push(str8_lit("TODO"));
-          taken = 1;
-        }
-        if(ui_clicked(ui_buttonf("paste")))
-        {
-          ik_message_push(str8_lit("TODO"));
+          os_set_clipboard_text(str8_lit(""));
+          ik_state->last_box_key_copied = box->key;
           taken = 1;
         }
         if(ui_clicked(ui_buttonf("delete")))
@@ -6613,6 +6710,37 @@ ik_ui_g_ctx_menu()
     {
       B32 taken = 0;
 
+      // paste
+      if(ui_clicked(ui_buttonf("paste")))
+      {
+        ik_paste();
+      }
+
+      // saving
+      if(ui_clicked(ui_buttonf("save")))
+      {
+        ik_frame_to_tyml(frame);
+        ik_message_push(push_str8f(ik_frame_arena(), "saved: %S", frame->save_path));
+        taken = 1;
+      }
+
+      if(ui_clicked(ui_buttonf("export all images")))
+      {
+        U64 count = 0;
+        for(U64 slot_idx = 0; slot_idx < ArrayCount(frame->image_cache_table); slot_idx++)
+        {
+          for(IK_ImageCacheNode *n = frame->image_cache_table[slot_idx].first; n != 0; n = n->next, count++)
+          {
+            IK_Image *image = &n->v;
+            String8 binary_path = os_get_process_info()->binary_path; // only directory
+            String8 default_path = push_str8f(ik_frame_arena(), "%S/%I64u.png", binary_path, image->key.u64[0]);
+            ik_image_to_png_file(image, default_path);
+          }
+        }
+        ik_message_push(push_str8f(ik_frame_arena(), "%I64u saved", count));
+        taken = 1;
+      }
+
       // crt
       {
         UI_Signal sig;
@@ -6643,31 +6771,6 @@ ik_ui_g_ctx_menu()
           ik_state->crt_enabled = !ik_state->crt_enabled;
           taken = 1;
         }
-      }
-
-      // saving
-      if(ui_clicked(ui_buttonf("save")))
-      {
-        ik_frame_to_tyml(frame);
-        ik_message_push(push_str8f(ik_frame_arena(), "saved: %S", frame->save_path));
-        taken = 1;
-      }
-
-      if(ui_clicked(ui_buttonf("export all images")))
-      {
-        U64 count = 0;
-        for(U64 slot_idx = 0; slot_idx < ArrayCount(frame->image_cache_table); slot_idx++)
-        {
-          for(IK_ImageCacheNode *n = frame->image_cache_table[slot_idx].first; n != 0; n = n->next, count++)
-          {
-            IK_Image *image = &n->v;
-            String8 binary_path = os_get_process_info()->binary_path; // only directory
-            String8 default_path = push_str8f(ik_frame_arena(), "%S/%I64u.png", binary_path, image->key.u64[0]);
-            ik_image_to_png_file(image, default_path);
-          }
-        }
-        ik_message_push(push_str8f(ik_frame_arena(), "%I64u saved", count));
-        taken = 1;
       }
 
       if(taken)
