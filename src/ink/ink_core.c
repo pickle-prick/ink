@@ -4180,10 +4180,12 @@ IK_BOX_DRAW(arrow)
 
     Vec2F32 prev = p0;
     F32 last_scaled_stroke_size = stroke_size;
+    F32 min_visiable_stroke_size = (2*ik_state->dpi/96.f) * ik_state->world_to_screen_ratio.x;
     for(U64 i = 1; i <= steps; i++)
     {
       F32 scaled_stroke_size = last_scaled_stroke_size*0.96f;
       scaled_stroke_size = ClampBot(stroke_size*0.25, scaled_stroke_size);
+      scaled_stroke_size = ClampBot(min_visiable_stroke_size, scaled_stroke_size);
       last_scaled_stroke_size = scaled_stroke_size;
       F32 t = (F32)i / (F32)steps;
       F32 u = 1.0f - t;
