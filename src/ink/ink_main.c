@@ -43,6 +43,7 @@
 #include "font_Mplus1Code-Medium.h"
 #include "font_Virgil.h"
 #include "font_XiaolaiMono-Regular.h"
+#include "font_JetBrainsMono-Regular.h"
 #endif
 
 // [c]

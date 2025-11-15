@@ -617,20 +617,21 @@ ik_init(OS_Handle os_wnd, R_Handle r_wnd)
   // Fonts
 #if BUILD_DEBUG
   ik_state->cfg_font_tags[IK_FontSlot_Main] = fnt_tag_from_path(str8_lit("./data/fonts/segoeui.ttf"));
-  ik_state->cfg_font_tags[IK_FontSlot_Code] = fnt_tag_from_path(str8_lit("./data/fonts/segoeui.ttf"));
+  ik_state->cfg_font_tags[IK_FontSlot_Code] = fnt_tag_from_path(str8_lit("./data/fonts/JetBrainsMono-Regular.ttf"));
   ik_state->cfg_font_tags[IK_FontSlot_Icons] = fnt_tag_from_path(str8_lit("./data/fonts/icons.ttf"));
   ik_state->cfg_font_tags[IK_FontSlot_IconsExtra] = fnt_tag_from_path(str8_lit("./data/fonts/icons_extra.ttf"));
   ik_state->cfg_font_tags[IK_FontSlot_HandWrite1] = fnt_tag_from_path(str8_lit("./data/fonts/Virgil.ttf"));
   ik_state->cfg_font_tags[IK_FontSlot_HandWrite2] = fnt_tag_from_path(str8_lit("./data/fonts/XiaolaiMono-Regular.ttf"));
 #else
   // String8 font_mono = str8(ttf_Mplus1Code_Medium, ttf_Mplus1Code_Medium_len);
-  String8 font_mono = str8(ttf_segoeui, ttf_segoeui_len);
+  String8 font_main = str8(ttf_segoeui, ttf_segoeui_len);
+  String8 font_code = str8(ttf_JetBrainsMono_Regular, ttf_JetBrainsMono_Regular_len);
   String8 font_icons = str8(ttf_icons, ttf_icons_len);
   String8 font_icons_extra = str8(ttf_icons_extra, ttf_icons_extra_len);
   String8 font_virgil = str8(ttf_Virgil, ttf_Virgil_len);
   String8 font_xiaolai = str8(ttf_XiaolaiMono_Regular, ttf_XiaolaiMono_Regular_len);
-  ik_state->cfg_font_tags[IK_FontSlot_Main] = fnt_tag_from_static_data_string(&font_mono);
-  ik_state->cfg_font_tags[IK_FontSlot_Code] = fnt_tag_from_static_data_string(&font_mono);
+  ik_state->cfg_font_tags[IK_FontSlot_Main] = fnt_tag_from_static_data_string(&font_main);
+  ik_state->cfg_font_tags[IK_FontSlot_Code] = fnt_tag_from_static_data_string(&font_code);
   ik_state->cfg_font_tags[IK_FontSlot_Icons] = fnt_tag_from_static_data_string(&font_icons);
   ik_state->cfg_font_tags[IK_FontSlot_IconsExtra] = fnt_tag_from_static_data_string(&font_icons_extra);
   ik_state->cfg_font_tags[IK_FontSlot_HandWrite1] = fnt_tag_from_static_data_string(&font_virgil);
@@ -6129,8 +6130,8 @@ ik_ui_inspector(void)
             UI_PrefWidth(ui_children_sum(1.0))
             UI_Row
             {
-              IK_FontSlot slots[] = {IK_FontSlot_Code, IK_FontSlot_HandWrite1, IK_FontSlot_HandWrite2};
-              char *displays[3] = {"code", "hand1", "hand2"};
+              IK_FontSlot slots[] = {IK_FontSlot_Main, IK_FontSlot_Code, IK_FontSlot_HandWrite1, IK_FontSlot_HandWrite2};
+              char *displays[] = {"base", "code", "hand1", "hand2"};
 
               UI_PrefWidth(ui_text_dim(1, 1.0))
               for(U64 i = 0; i < ArrayCount(slots); i++)

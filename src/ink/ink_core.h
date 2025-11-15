@@ -427,6 +427,7 @@ typedef U64 IK_BoxFlags;
 # define IK_BoxFlag_OmitCtxMenu           (IK_BoxFlags)(1ull<<33)
 # define IK_BoxFlag_DrawKeyOverlay        (IK_BoxFlags)(1ull<<34)
 # define IK_BoxFlag_DoubleClickToUnFocus  (IK_BoxFlags)(1ull<<35)
+# define IK_BoxFlag_Transparent           (IK_BoxFlags)(1ull<<36) // FIXME: make use of this flag, maybe for blank or select box?
 
 // compound flags
 #define IK_BoxFlag_Dragable (IK_BoxFlag_DragToScaleFontSize|IK_BoxFlag_DragToScalePoint|IK_BoxFlag_DragToScaleRectSize|IK_BoxFlag_DragToPosition|IK_BoxFlag_DragToScaleStrokeSize|IK_BoxFlag_DragToScaleStrokeSize)
