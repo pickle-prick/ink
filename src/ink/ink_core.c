@@ -2379,9 +2379,9 @@ ik_frame(void)
         // TODO: check if os supports ms granular sleep
         B32 granular_sleep = 1;
         U64 remain_ms = (frame_time_target_cap_us-work_us)/1000;
-        if(granular_sleep && remain_ms > 2000)
+        if(granular_sleep && remain_ms > 2)
         {
-          os_sleep_milliseconds(remain_ms-1000);
+          os_sleep_milliseconds(remain_ms-1);
         }
         work_us = os_now_microseconds()-begin_time_us;
       }
