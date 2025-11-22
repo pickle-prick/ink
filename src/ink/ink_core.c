@@ -1385,7 +1385,7 @@ ik_frame(void)
         {
           delete = 1;
         }
-        if((box->sig.f&IK_SignalFlag_Delete || box->deleted) && !(box->flags&IK_BoxFlag_OmitDeletion))
+        if(box->sig.f&IK_SignalFlag_Delete)
         {
           delete = 1;
         }
@@ -1796,16 +1796,10 @@ ik_frame(void)
     //   select->flags |= IK_BoxFlag_Disabled;
     // }
 
-    //- delete sig on select box? -> delete all grouped children
-    if(select->sig.f&IK_SignalFlag_Delete || select->deleted)
+    //- select box has no group children -> mark disabled
+    if(!(select->flags&IK_BoxFlag_Disabled) && select->group_children_count == 0)
     {
-      for(IK_Box *child = select->group_first, *next = 0; child != 0; child = next)
-      {
-        next = child->group_next;
-        ik_box_release(child);
-      }
       select->flags |= IK_BoxFlag_Disabled;
-      select->deleted = 0;
     }
 
     //- select box is not focused -> disable it
@@ -1817,18 +1811,7 @@ ik_frame(void)
     //- select box is disabled? -> rest its state
     if(select->flags&IK_BoxFlag_Disabled)
     {
-      for(IK_Box *child = select->group_first, *next = 0; child != 0; child = next)
-      {
-        next = child->group_next;
-        child->group = 0;
-        child->group_next = 0;
-        child->group_prev = 0;
-      }
-
-      select->rect_size = v2f32(0,0);
-      select->group_first = 0;
-      select->group_last = 0;
-      select->group_children_count = 0;
+      ik_selection_clear();
     }
 
     //- select box is focused -> flag every selected box 
@@ -2546,12 +2529,34 @@ ik_get_drag_data(U64 min_required_size)
 }
 
 //- selecting
+
 internal inline B32
 ik_is_selecting(void)
 {
   Vec2F32 dim = dim_2f32(ik_state->selection_rect);
   B32 ret = ik_tool() == IK_ToolKind_Selection && ik_dragging(ik_state->active_frame->blank->sig) && (dim.x > 0 && dim.y > 0);
   return ret;
+}
+
+internal void
+ik_selection_clear()
+{
+  IK_Frame *frame = ik_top_frame();
+  IK_Box *select = frame->select;
+  for(IK_Box *child = select->group_first, *next = 0;
+      child != 0;
+      child = next)
+  {
+    next = child->group_next;
+    child->group = 0;
+    child->group_next = 0;
+    child->group_prev = 0;
+  }
+
+  select->rect_size = v2f32(0,0);
+  select->group_first = 0;
+  select->group_last = 0;
+  select->group_children_count = 0;
 }
 
 /////////////////////////////////
@@ -2623,14 +2628,31 @@ ik_paste()
     IK_Box *src = ik_box_from_key(ik_state->last_box_key_copied);
     if(src)
     {
+      IK_Box *root = 0;
+      if(src == ik_select_box())
+      {
+        for(IK_Box *b = src->group_first, *next = 0;
+            b != 0;
+            b = next)
+        {
+          next = b->group_next;
+          IK_Box *cloned = ik_box_clone(b);
+          DLLInsert_NP(src->group_first, src->group_last, b, cloned, group_next, group_prev);
+          DLLRemove_NP(src->group_first, src->group_last, b, group_next, group_prev);
+        }
+        root = src;
+      }
+      else
+      {
+        root = ik_box_clone(src);
+      }
+
       Vec2F32 offset = sub_2f32(ik_state->mouse_in_world, src->position);
-      // FIXME: handle select group box, we need a way to bypass this box
-      IK_Box *dst = ik_box_clone(src);
-      ik_box_do_translate(dst, offset);
-      dst->disabled_t = 1.0;
+      ik_box_do_translate(root, offset);
+      root->disabled_t = 1.0;
       ik_kill_action();
       ik_kill_focus();
-      ik_state->focus_hot_box_key[IK_MouseButtonKind_Left] = dst->key;
+      ik_state->focus_hot_box_key[IK_MouseButtonKind_Left] = root->key;
       pasted = 1;
     }
   }
@@ -3013,8 +3035,7 @@ ik_frame_alloc()
                                            IK_BoxFlag_FitViewport|
                                            IK_BoxFlag_DrawKeyOverlay|
                                            IK_BoxFlag_Orphan|
-                                           IK_BoxFlag_OmitGroupSelection|
-                                           IK_BoxFlag_OmitDeletion,
+                                           IK_BoxFlag_Transparent,
                                            "blank");
   frame->select = ik_build_box_from_stringf(IK_BoxFlag_MouseClickable|
                                             IK_BoxFlag_ClickToFocus|
@@ -3023,8 +3044,7 @@ ik_frame_alloc()
                                             IK_BoxFlag_DrawBackground|
                                             IK_BoxFlag_DrawDropShadow|
                                             IK_BoxFlag_DragToPosition|
-                                            IK_BoxFlag_OmitGroupSelection|
-                                            IK_BoxFlag_OmitDeletion|
+                                            IK_BoxFlag_Transparent|
                                             IK_BoxFlag_FixedRatio|
                                             IK_BoxFlag_FitChildren,
                                             "select");
@@ -3083,6 +3103,8 @@ ik_build_box_from_key_(IK_BoxFlags flags, IK_Key key, B32 pre_order)
   }
   MemoryZeroStruct(box);
 
+  IK_Box *group_parent = ik_top_group_parent();
+
   IK_Palette *palette = ik_top_palette();
   // fill box info
   box->key = key;
@@ -3122,6 +3144,12 @@ ik_build_box_from_key_(IK_BoxFlags flags, IK_Key key, B32 pre_order)
     list->count++;
   }
 
+  if(group_parent)
+  {
+    DLLPushBack_NP(group_parent->group_first, group_parent->group_last, box, group_next, group_prev);
+    group_parent->group_children_count++;
+  }
+
   ProfEnd();
   return box;
 }
@@ -3157,55 +3185,58 @@ internal IK_Box *
 ik_box_clone(IK_Box *src)
 {
   Temp scratch = scratch_begin(0,0);
-  IK_BoxFlags flags = src->flags;
-  String8 src_name = ik_display_part_from_key_string(src->name);
-  String8 dst_name = push_str8f(scratch.arena, "%S###%I64u", src_name, os_now_microseconds());
-  IK_Box *ret = ik_build_box_from_string(flags, dst_name);
 
-  // fill info
-  ret->position          = src->position;
-  ret->rotation          = src->rotation;
-  ret->rect_size         = src->rect_size;
-  ret->last_rect_size    = src->last_rect_size;
-  ret->background_color  = src->background_color;
-  ret->text_color        = src->text_color;
-  ret->border_color      = src->border_color;
-  ret->ratio             = src->ratio;
-  ret->hover_cursor      = src->hover_cursor;
-  ret->transparency      = src->transparency;
-  ret->stroke_size       = src->stroke_size;
-  ret->stroke_color      = src->stroke_color;
-  ret->image             = src->image;
-  if(ret->image) ret->image->rc++;
-  // string
-  ret->string            = ik_push_str8_copy(src->string);
-  ret->font_slot         = src->font_slot;
-  ret->font_size         = src->font_size;
-  ret->tab_size          = src->tab_size;
-  ret->text_raster_flags = src->text_raster_flags;
-  ret->text_padding      = src->text_padding;
-  ret->text_align        = src->text_align;
-  // points
-  for(IK_Point *point = src->first_point;
-      point != 0;
-      point = point->next)
+  IK_Box *group_parent = ik_top_group_parent();
+  IK_Box *ret = 0;
+  if(!(src->flags&IK_BoxFlag_Transparent))
   {
-    IK_Point *dst = ik_point_alloc();
-    dst->position = point->position;
-    DLLPushBack(ret->first_point, ret->last_point, dst);
-    ret->point_count++;
+    IK_BoxFlags flags = src->flags;
+    String8 src_name = ik_display_part_from_key_string(src->name);
+    String8 dst_name = push_str8f(scratch.arena, "%S###%I64u", src_name, os_now_microseconds());
+    ret = ik_build_box_from_string(flags, dst_name);
+    group_parent = ret;
+
+    // fill info
+    ret->position          = src->position;
+    ret->rotation          = src->rotation;
+    ret->rect_size         = src->rect_size;
+    ret->last_rect_size    = src->last_rect_size;
+    ret->background_color  = src->background_color;
+    ret->text_color        = src->text_color;
+    ret->border_color      = src->border_color;
+    ret->ratio             = src->ratio;
+    ret->hover_cursor      = src->hover_cursor;
+    ret->transparency      = src->transparency;
+    ret->stroke_size       = src->stroke_size;
+    ret->stroke_color      = src->stroke_color;
+    ret->image             = src->image;
+    if(ret->image) ret->image->rc++;
+    // string
+    ret->string            = ik_push_str8_copy(src->string);
+    ret->font_slot         = src->font_slot;
+    ret->font_size         = src->font_size;
+    ret->tab_size          = src->tab_size;
+    ret->text_raster_flags = src->text_raster_flags;
+    ret->text_padding      = src->text_padding;
+    ret->text_align        = src->text_align;
+    // points
+    for(IK_Point *point = src->first_point;
+        point != 0;
+        point = point->next)
+    {
+      IK_Point *dst = ik_point_alloc();
+      dst->position = point->position;
+      DLLPushBack(ret->first_point, ret->last_point, dst);
+      ret->point_count++;
+    }
+    ret->draw_frame_index = ik_state->frame_index+1;
   }
 
   // recursive
-  for(IK_Box *c = src->group_first; c != 0; c = c->group_next)
+  IK_GroupParent_Scope(group_parent) for(IK_Box *c = src->group_first; c != 0; c = c->group_next)
   {
-    IK_Box *group_child = ik_box_clone(c);
-    DLLPushBack_NP(ret->group_first, ret->group_last, group_child, group_next, group_prev);
-    ret->group_children_count++;
+    ik_box_clone(c);
   }
-
-  ret->draw_frame_index = ik_state->frame_index+1;
-
   scratch_end(scratch);
   return ret;
 }
@@ -3223,6 +3254,8 @@ ik_box_release(IK_Box *box)
     next = c->group_next;
     ik_box_release(c);
   }
+
+  if(box->flags&IK_BoxFlag_Transparent) return;
 
   if(group)
   {
@@ -4236,44 +4269,47 @@ ik_arrow()
 internal void
 ik_box_do_scale(IK_Box *box, Vec2F32 scale, Vec2F32 origin)
 {
-  // rect size
-  if(box->flags & IK_BoxFlag_DragToScaleRectSize)
+  if(!(box->flags&IK_BoxFlag_Transparent))
   {
-    box->rect_size.x *= scale.x;
-    box->rect_size.y *= scale.y;
-  }
-
-  // font size
-  if(box->flags&IK_BoxFlag_DragToScaleFontSize)
-  {
-    box->font_size *= scale.y;
-  }
-
-  // stroke_size
-  if(box->flags&IK_BoxFlag_DragToScaleStrokeSize)
-  {
-    // FIXME: this won't cut it, stroke and arrow are fixed-ratio
-    box->stroke_size *= scale.y;
-  }
-
-  // position scale
-  {
-    Vec2F32 pos_rel = sub_2f32(box->position, origin);
-    pos_rel.x *= scale.x;
-    pos_rel.y *= scale.y;
-    box->position = add_2f32(pos_rel, origin);
-  }
-
-  // point scale
-  if(box->flags & IK_BoxFlag_DragToScalePoint)
-  {
-    for(IK_Point *p = box->first_point; p != 0; p = p->next)
+    // rect size
+    if(box->flags & IK_BoxFlag_DragToScaleRectSize)
     {
-      Vec2F32 pos_next = sub_2f32(p->position, origin);
-      pos_next.x *= scale.x;
-      pos_next.y *= scale.y;
-      pos_next = add_2f32(pos_next, origin);
-      p->position = pos_next;
+      box->rect_size.x *= scale.x;
+      box->rect_size.y *= scale.y;
+    }
+
+    // font size
+    if(box->flags&IK_BoxFlag_DragToScaleFontSize)
+    {
+      box->font_size *= scale.y;
+    }
+
+    // stroke_size
+    if(box->flags&IK_BoxFlag_DragToScaleStrokeSize)
+    {
+      // FIXME: this won't cut it, stroke and arrow are fixed-ratio
+      box->stroke_size *= scale.y;
+    }
+
+    // position scale
+    {
+      Vec2F32 pos_rel = sub_2f32(box->position, origin);
+      pos_rel.x *= scale.x;
+      pos_rel.y *= scale.y;
+      box->position = add_2f32(pos_rel, origin);
+    }
+
+    // point scale
+    if(box->flags & IK_BoxFlag_DragToScalePoint)
+    {
+      for(IK_Point *p = box->first_point; p != 0; p = p->next)
+      {
+        Vec2F32 pos_next = sub_2f32(p->position, origin);
+        pos_next.x *= scale.x;
+        pos_next.y *= scale.y;
+        pos_next = add_2f32(pos_next, origin);
+        p->position = pos_next;
+      }
     }
   }
 
@@ -4288,13 +4324,16 @@ ik_box_do_scale(IK_Box *box, Vec2F32 scale, Vec2F32 origin)
 internal void
 ik_box_do_translate(IK_Box *box, Vec2F32 translate)
 {
-  box->position = add_2f32(box->position, translate);
-
-  // translate points
-  for(IK_Point *p = box->first_point; p != 0; p = p->next)
+  if(!(box->flags&IK_BoxFlag_Transparent))
   {
-    p->position.x += translate.x;
-    p->position.y += translate.y;
+    box->position = add_2f32(box->position, translate);
+
+    // translate points
+    for(IK_Point *p = box->first_point; p != 0; p = p->next)
+    {
+      p->position.x += translate.x;
+      p->position.y += translate.y;
+    }
   }
 
   for(IK_Box *child = box->group_first;
@@ -4831,7 +4870,7 @@ ik_signal_from_box(IK_Box *box)
   ////////////////////////////////
   //~ Box overlap with selection rect? -> add to selection list
 
-  if(ik_is_selecting() && !(box->flags&IK_BoxFlag_OmitGroupSelection))
+  if(ik_is_selecting() && !(box->flags&IK_BoxFlag_Transparent))
   {
     if(overlaps_2f32(ik_state->selection_rect, rect))
     {
@@ -6615,7 +6654,6 @@ ik_ui_box_ctx_menu(void)
 {
   IK_Key focus_hot_box_key = ik_state->focus_hot_box_key[IK_MouseButtonKind_Right];
   IK_Box *box = ik_box_from_key(focus_hot_box_key);
-  B32 deleted = 0;
   B32 is_focus_active = ik_key_match(ik_state->focus_active_box_key, focus_hot_box_key);
   if(box && !(box->flags&IK_BoxFlag_OmitCtxMenu) && !is_focus_active)
   {
@@ -6642,7 +6680,6 @@ ik_ui_box_ctx_menu(void)
         }
         if(ui_clicked(ui_buttonf("delete")))
         {
-          deleted = 1;
           taken = 1;
         }
         if(box->flags&IK_BoxFlag_DrawImage && ui_clicked(ui_buttonf("export as png")))
@@ -6679,13 +6716,6 @@ ik_ui_box_ctx_menu(void)
     else if(opened && box->sig.f&IK_SignalFlag_RightPressed)
     {
       ui_ctx_menu_close();
-    }
-
-    if(deleted)
-    {
-      // TODO(Next): box could be select box, we don't handle deletion here
-      //             just a hack for now, find a better way later
-      box->deleted = 1;
     }
   }
 }

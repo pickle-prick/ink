@@ -6,6 +6,10 @@ IK_StackTable:
   //- k: frame
   { Frame                              frame                        `IK_Frame *`           `0`                                }
 
+  //- k: group
+  { GroupParent                        group_parent                 `IK_Box *`             `0`                                }
+
+
   //- k: font
   { Font                               font                          FNT_Tag               `fnt_tag_zero()`                   }
   { FontSlot                           font_slot                     IK_FontSlot           IK_FontSlot_Main                   }

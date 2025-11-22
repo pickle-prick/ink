@@ -409,13 +409,12 @@ typedef U64 IK_BoxFlags;
 # define IK_BoxFlag_DragToPosition        (IK_BoxFlags)(1ull<<21)
 // misc
 # define IK_BoxFlag_Orphan                (IK_BoxFlags)(1ull<<22) // won't push to the frame's box list 
-# define IK_BoxFlag_OmitGroupSelection    (IK_BoxFlags)(1ull<<23)
-# define IK_BoxFlag_OmitDeletion          (IK_BoxFlags)(1ull<<24)
+// # define IK_BoxFlag_OmitGroupSelection    (IK_BoxFlags)(1ull<<23)
+// # define IK_BoxFlag_OmitDeletion          (IK_BoxFlags)(1ull<<24) // FIXME: we could remove this flag or reorder them, but backward compatiblity, we should use a version mapping
 # define IK_BoxFlag_DoubleClickToCenter   (IK_BoxFlags)(1ull<<25)
 # define IK_BoxFlag_PruneZeroText         (IK_BoxFlags)(1ull<<26)
 // TODO(Next): move these into text section
 # define IK_BoxFlag_WrapText              (IK_BoxFlags)(1ull<<27)
-// TODO(Next): move these into size section
 # define IK_BoxFlag_ClampBotTextDimX      (IK_BoxFlags)(1ull<<28)
 # define IK_BoxFlag_ClampBotTextDimY      (IK_BoxFlags)(1ull<<29)
 // TODO(Next): move these into drawing section
@@ -427,7 +426,7 @@ typedef U64 IK_BoxFlags;
 # define IK_BoxFlag_OmitCtxMenu           (IK_BoxFlags)(1ull<<33)
 # define IK_BoxFlag_DrawKeyOverlay        (IK_BoxFlags)(1ull<<34)
 # define IK_BoxFlag_DoubleClickToUnFocus  (IK_BoxFlags)(1ull<<35)
-# define IK_BoxFlag_Transparent           (IK_BoxFlags)(1ull<<36) // FIXME: make use of this flag, maybe for blank or select box?
+# define IK_BoxFlag_Transparent           (IK_BoxFlags)(1ull<<36) // fallthrough operations (translate, scale, deletion, selection, paste)
 
 // compound flags
 #define IK_BoxFlag_Dragable (IK_BoxFlag_DragToScaleFontSize|IK_BoxFlag_DragToScalePoint|IK_BoxFlag_DragToScaleRectSize|IK_BoxFlag_DragToPosition|IK_BoxFlag_DragToScaleStrokeSize|IK_BoxFlag_DragToScaleStrokeSize)
@@ -517,7 +516,6 @@ struct IK_Box
   Vec2F32 text_bounds;
   // TODO(Next): we may remove this
   void *draw_data;
-  B32 deleted; // TODO(Next): not the prettiest thing in the world, find a better way
 
   // Animation
   F32 hot_t;
@@ -929,6 +927,8 @@ internal String8 ik_get_drag_data(U64 min_required_size);
 
 //- selecting
 internal inline B32 ik_is_selecting(void);
+internal void ik_selection_clear();
+#define ik_select_box() (ik_top_frame()->select)
 
 /////////////////////////////////
 //~ Clipboard Functions
