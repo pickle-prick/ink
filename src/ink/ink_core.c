@@ -1510,6 +1510,35 @@ ik_frame(void)
           ik_state->selection_bounds.y1 = Max(ik_state->selection_bounds.y1, rect.y1);
         }
 
+        // FIXME: it's weird to put it here
+        if(box->flags&IK_BoxFlag_DrawTag && box->name.size > 0)
+        {
+          Vec2F32 screen_pos = ik_screen_pos_from_world(box->position);
+          UI_Key key = {box->key.u64[0]};
+          UI_Box *tag_box = ui_box_from_key(key);
+          B32 box_first_frame = ui_box_is_nil(tag_box) ? 0 : tag_box->last_touched_build_index == ui_state->build_index;
+          if(!box_first_frame)
+          {
+            F32 padding = 4.0;
+            screen_pos.y -= (tag_box->fixed_size.y + padding);
+          }
+
+          UI_Palette(ui_build_palette(ui_top_palette(), .border = ik_rgba_from_theme_color(IK_ThemeColor_BaseBackground),
+                                                        .text = v4f32(0,0,0,1.0),
+                                                        .background = ik_rgba_from_theme_color(IK_ThemeColor_Breakpoint)))
+          UI_Transparency(0.1)
+          UI_Flags(UI_BoxFlag_DrawBorder|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawText|UI_BoxFlag_DrawDropShadow)
+          UI_FixedPos(screen_pos)
+          // UI_FontSize(ui_top_font_size()*1.1)
+          UI_Squish(mix_1f32(0.05, 0.0, box->hot_t))
+          UI_CornerRadius(1.0)
+          UI_PrefWidth(ui_text_dim(1.0, 0.0))
+          {
+            UI_Box *b = ui_build_box_from_key(0, key);
+            ui_box_equip_display_string(b, box->name);
+          }
+        }
+
         ////////////////////////////////
         // animation (hot_t, ...)
         
@@ -2184,7 +2213,7 @@ ik_frame(void)
           // draw border
           if(box->flags & IK_BoxFlag_DrawBorder && !zero_dim)
           {
-            F32 border_thickness = 1.5 * ik_state->world_to_screen_ratio.x;
+            F32 border_thickness = 1.0 * ik_state->world_to_screen_ratio.x;
             R_Rect2DInst *inst = dr_rect_keyed(pad_2f32(dst, 2*border_thickness), box->border_color, 0, border_thickness, border_thickness/2.0, box->key_3f32);
           }
 
@@ -5466,7 +5495,8 @@ ik_ui_selection(void)
 
     Rng2F32 rect = r2f32p(p0.x, p0.y, p1.x, p1.y);
     Vec2F32 center = center_2f32(rect);
-    F32 padding_px =  ui_top_font_size()*0.5;
+    // F32 padding_px = ui_top_font_size()*0.5;
+    F32 padding_px = 0.0;
     rect = pad_2f32(rect, padding_px);
     Vec2F32 rect_dim = dim_2f32(rect);
 
@@ -5998,8 +6028,23 @@ ik_ui_inspector(void)
         UI_WidthFill
         UI_Row
         {
+          IK_BoxFlags flag = IK_BoxFlag_DrawTag;
+          B32 on = !!(b->flags&flag);
+          UI_PrefWidth(ui_text_dim(1, 1.0))
+            ui_labelf("draw tag");
+          ui_spacer(ui_pct(1.0, 0.0));
+          UI_PrefWidth(ui_top_pref_height()) if(ui_clicked(ik_ui_checkbox(str8_lit("draw_tag"), on)))
+          {
+            b->flags ^= flag;
+          }
+        }
+        ui_spacer(ui_em(0.2, 0.0));
+
+        UI_WidthFill
+        UI_Row
+        {
           IK_BoxFlags flag = IK_BoxFlag_DrawBorder;
-          B32 on = b->flags&flag;
+          B32 on = !!(b->flags&flag);
           UI_PrefWidth(ui_text_dim(1, 1.0))
             ui_labelf("draw border");
           ui_spacer(ui_pct(1.0, 0.0));
@@ -6008,14 +6053,13 @@ ik_ui_inspector(void)
             b->flags ^= flag;
           }
         }
-
         ui_spacer(ui_em(0.2, 0.0));
 
         UI_WidthFill
         UI_Row
         {
           IK_BoxFlags flag = IK_BoxFlag_DrawBackground;
-          B32 on = b->flags&flag;
+          B32 on = !!(b->flags&flag);
           UI_PrefWidth(ui_text_dim(1, 1.0))
             ui_labelf("draw background");
           ui_spacer(ui_pct(1.0, 0.0));
@@ -6047,7 +6091,7 @@ ik_ui_inspector(void)
         UI_Row
         {
           IK_BoxFlags flag = IK_BoxFlag_DrawHotEffects;
-          B32 on = b->flags&flag;
+          B32 on = !!(b->flags&flag);
           UI_PrefWidth(ui_text_dim(1, 1.0))
             ui_labelf("draw hot effects");
           ui_spacer(ui_pct(1.0, 0.0));
@@ -6063,7 +6107,7 @@ ik_ui_inspector(void)
         UI_Row
         {
           IK_BoxFlags flag = IK_BoxFlag_DrawActiveEffects;
-          B32 on = b->flags&flag;
+          B32 on = !!(b->flags&flag);
           UI_PrefWidth(ui_text_dim(1, 1.0))
             ui_labelf("draw active effects");
           ui_spacer(ui_pct(1.0, 0.0));
