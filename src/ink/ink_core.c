@@ -1530,7 +1530,7 @@ ik_frame(void)
           UI_Flags(UI_BoxFlag_DrawBorder|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawText|UI_BoxFlag_DrawDropShadow)
           UI_FixedPos(screen_pos)
           // UI_FontSize(ui_top_font_size()*1.1)
-          UI_Squish(mix_1f32(0.05, 0.0, box->hot_t))
+          // UI_Squish(mix_1f32(0.05, 0.0, box->hot_t))
           UI_CornerRadius(1.0)
           UI_PrefWidth(ui_text_dim(1.0, 0.0))
           {
@@ -5500,10 +5500,13 @@ ik_ui_selection(void)
     rect = pad_2f32(rect, padding_px);
     Vec2F32 rect_dim = dim_2f32(rect);
 
+    Vec4F32 background_clr = v4f32(1.0,1.0,1.0,1.0);
+    background_clr.w = mix_1f32(0.2, 0.1, box->hot_t);
+
     UI_Box *container;
     UI_Rect(rect)
       UI_Flags(UI_BoxFlag_DrawBackground)
-      UI_Palette(ui_build_palette(ui_top_palette(), .background = v4f32(0,0,0,0.15)))
+      UI_Palette(ui_build_palette(ui_top_palette(), .background = background_clr))
       UI_Squish(1.0-box->focus_hot_t)
       container = ui_build_box_from_stringf(0, "###selection_box");
 
@@ -5513,13 +5516,12 @@ ik_ui_selection(void)
     F32 active_t = ui_anim(ui_key_from_stringf(ui_key_zero(), "selection_active_t"), is_active, .reset = 0, .rate = ik_state->animation.slow_rate);
 
     Vec4F32 base_clr = ik_rgba_from_theme_color(IK_ThemeColor_BaseBorder);
-    Vec4F32 hot_clr = ik_rgba_from_theme_color(IK_ThemeColor_MenuBarBorder);
-    Vec4F32 clr = mix_4f32(base_clr, hot_clr, Max(active_t, hot_t));
-    clr.w = 1.0;
-    Vec4F32 background_clr = ik_rgba_from_theme_color(IK_ThemeColor_BaseBackground);
+    Vec4F32 hot_clr = ik_rgba_from_theme_color(IK_ThemeColor_BaseBackground);
+    Vec4F32 border_clr = mix_4f32(base_clr, hot_clr, 0.8+Max(active_t, hot_t)*0.5);
+    border_clr.w = 1.0;
 
     UI_Parent(container)
-      UI_Palette(ui_build_palette(ui_top_palette(), .border = clr, .background = background_clr))
+      UI_Palette(ui_build_palette(ui_top_palette(), .border = border_clr, .background = ik_rgba_from_theme_color(IK_ThemeColor_Breakpoint)))
     {
       /////////////////////////////////
       //~ Corners
@@ -5748,7 +5750,6 @@ ik_ui_selection(void)
           }
         }
       }
-
     }
 
     /////////////////////////////////
@@ -5756,6 +5757,7 @@ ik_ui_selection(void)
 
     UI_Rect(rect)
       UI_Flags(UI_BoxFlag_DrawBorder)
+      UI_Palette(ui_build_palette(ui_top_palette(), .border = ik_rgba_from_theme_color(IK_ThemeColor_BaseBackground)))
       UI_CornerRadius(4.f)
       ui_build_box_from_stringf(0, "###border");
 
