@@ -1327,11 +1327,18 @@ ik_frame(void)
     camera->is_panning = is_panning;
 
     // camera animations
+    F32 ep = (ik_state->dpi/96.f)*1.1*ik_state->world_to_screen_ratio.x;
+    if(abs_f32(camera->target_rect.x0-camera->rect.x0) < ep) camera->rect.x0 = camera->target_rect.x0;
+    if(abs_f32(camera->target_rect.x1-camera->rect.x1) < ep) camera->rect.x1 = camera->target_rect.x1;
+    if(abs_f32(camera->target_rect.y0-camera->rect.y0) < ep) camera->rect.y0 = camera->target_rect.y0;
+    if(abs_f32(camera->target_rect.y1-camera->rect.y1) < ep) camera->rect.y1 = camera->target_rect.y1;
     camera->rect.x0 += camera->anim_rate * (camera->target_rect.x0-camera->rect.x0);
     camera->rect.x1 += camera->anim_rate * (camera->target_rect.x1-camera->rect.x1);
     camera->rect.y0 += camera->anim_rate * (camera->target_rect.y0-camera->rect.y0);
     camera->rect.y1 += camera->anim_rate * (camera->target_rect.y1-camera->rect.y1);
-    camera->zoom_t  += ik_state->animation.slow_rate * ((F32)is_zooming-camera->zoom_t);
+
+    camera->zoom_t += ik_state->animation.slow_rate * ((F32)is_zooming-camera->zoom_t);
+    if(abs_f32(camera->zoom_t-(F32)is_zooming) < 0.001) camera->zoom_t = (F32)is_zooming;
   }
 
   ////////////////////////////////
