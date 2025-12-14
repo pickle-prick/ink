@@ -2623,17 +2623,7 @@ internal void
 ik_selection_commit()
 {
   IK_Box *select = ik_selection_box();
-  B32 select_any = 0;
-  for(IK_Box *b = select->group_first; b != 0; b = b->group_next)
-  {
-    if(!(b->flags&IK_BoxFlag_Disabled))
-    {
-      select_any = 1;
-      break;
-    }
-  }
-
-  if(select_any)
+  if(select->group_children_count > 0)
   {
     ik_state->focus_hot_box_key[IK_MouseButtonKind_Left] = select->key;
     select->flags ^= IK_BoxFlag_Disabled; // enable select box
@@ -5888,6 +5878,8 @@ ik_ui_inspector(void)
     F32 width_px = ui_top_font_size() * 24;
     Rng2F32 rect = {padding_left, 0, padding_left+width_px, ik_state->window_dim.y};
     UI_Rect(rect)
+      UI_Focus(open ? UI_FocusKind_On : UI_FocusKind_Off)
+      UI_Flags(UI_BoxFlag_DefaultFocusNav)
       container = ui_build_box_from_stringf(0, "###inspector_container");
 
     UI_Box *body;
@@ -5970,8 +5962,17 @@ ik_ui_inspector(void)
           UI_PrefWidth(ui_text_dim(1, 1.0))
             ui_labelf("name");
           ui_spacer(ui_pct(1.0, 0.0));
-          UI_PrefWidth(ui_text_dim(1, 1.0))
-            ui_labelf("%S", b->name);
+          // UI_PrefWidth(ui_children_sum(0.0))
+          // UI_TextAlignment(UI_TextAlign_Center)
+          if(ui_committed(ui_line_edit(&ik_state->edit_buffer.cursor, &ik_state->edit_buffer.mark, ik_state->edit_buffer.buffer, ArrayCount(ik_state->edit_buffer.buffer), &ik_state->edit_buffer.string_size, b->name, str8_lit("name/tag"))))
+          {
+            U64 size = Min(ik_state->edit_buffer.string_size, ArrayCount(b->_name));
+            MemoryCopy(b->_name, ik_state->edit_buffer.buffer, size);
+            b->name.size = size;
+            // ui_set_auto_focus_active_key(ui_key_zero());
+            // ui_set_auto_focus_hot_key(ui_key_zero());
+          }
+          // ui_label(b->name);
         }
 
         UI_WidthFill

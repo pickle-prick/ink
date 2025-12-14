@@ -832,6 +832,15 @@ struct IK_State
   // IK_View               views[IK_ViewKind_COUNT];
   // B32                   views_enabled[IK_ViewKind_COUNT];
 
+  // edit buffer (since we can only have one focus active ui box at a time
+  struct
+  {
+    TxtPt cursor;
+    TxtPt mark;
+    U8 buffer[512];
+    U64 string_size;
+  } edit_buffer;
+
   // animation
   struct
   {
