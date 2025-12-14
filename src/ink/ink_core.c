@@ -1534,7 +1534,7 @@ ik_frame(void)
                                                         .text = v4f32(0,0,0,1.0),
                                                         .background = ik_rgba_from_theme_color(IK_ThemeColor_Breakpoint)))
           UI_Transparency(0.1)
-          UI_Flags(UI_BoxFlag_DrawBorder|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawText|UI_BoxFlag_DrawDropShadow)
+          UI_Flags(UI_BoxFlag_DrawBorder|UI_BoxFlag_MouseClickable|UI_BoxFlag_DrawHotEffects|UI_BoxFlag_DrawActiveEffects|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawText|UI_BoxFlag_DrawDropShadow)
           UI_FixedPos(screen_pos)
           // UI_FontSize(ui_top_font_size()*1.1)
           // UI_Squish(mix_1f32(0.05, 0.0, box->hot_t))
@@ -1543,6 +1543,12 @@ ik_frame(void)
           {
             UI_Box *b = ui_build_box_from_key(0, key);
             ui_box_equip_display_string(b, box->name);
+            UI_Signal sig = ui_signal_from_box(b);
+            // FIXME: this event won't get eaten
+            if(ui_clicked(sig))
+            {
+              ik_state->focus_hot_box_key[IK_MouseButtonKind_Left] = box->key;
+            }
           }
         }
 
@@ -2358,6 +2364,7 @@ ik_frame(void)
   U64 frame_time_target_cap_us = (U64)(1000000/target_hz);
   U64 work_us = os_now_microseconds()-begin_time_us;
   ik_state->cpu_time_us = work_us;
+  ik_state->target_hz = target_hz;
   if(work_us < frame_time_target_cap_us)
   {
     ProfScope("wait frame target cap")
@@ -5157,6 +5164,54 @@ ik_ui_stats(void)
       ui_labelf("%.2f, %.2f", ui_state->drag_start_mouse.x, ui_state->drag_start_mouse.y);
     }
 
+    // cpu budge bar
+    UI_WidthFill
+    UI_PrefHeight(ui_em(2,0.f))
+    UI_Row
+    {
+      F32 cpu_t = 0.0;
+      F32 total_budget = 1.0/ik_state->target_hz;
+      {
+        UI_Box *bar = 0;
+        Vec4F32 color_range[2] = {v4f32(0,0.8,0,1), v4f32(0.8,0,0,1)};
+        F32 t = ik_state->cpu_time_us / (total_budget*1e6);
+        t = ClampTop(1.0, t);
+        cpu_t = t;
+        Vec4F32 color = mix_4f32(color_range[0], color_range[1], t);
+        UI_Palette(ui_build_palette(ui_top_palette(), .background = linear_from_srgba(color)))
+        UI_PrefWidth(ui_pct(t, 0.0))
+        UI_Flags(UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawBorder|UI_BoxFlag_DrawDropShadow)
+          bar = ui_build_box_from_stringf(0, "work cpu");
+
+        // UI_Rect(bar->rect)
+        UI_Parent(bar)
+          UI_Flags(UI_BoxFlag_Floating|UI_BoxFlag_DisableTextTrunc)
+          ui_labelf("Busy: %.2f ms", ik_state->cpu_time_us/1e3f);
+      }
+
+      {
+        UI_Box *bar = 0;
+        Vec4F32 color_range[2] = {v4f32(0,0.5,0,1), v4f32(0.5,0,0,1)};
+        F32 t = 1.0-cpu_t;
+        t = ClampBot(0.0, t);
+        Vec4F32 color = mix_4f32(color_range[1], color_range[0], t);
+        UI_Palette(ui_build_palette(ui_top_palette(), .background = linear_from_srgba(color)))
+        UI_PrefWidth(ui_pct(t, 0.0))
+        UI_ChildLayoutAxis(Axis2_X)
+        UI_Flags(UI_BoxFlag_DrawBackground)
+          bar = ui_build_box_from_stringf(0, "idle cpu");
+
+        // UI_Rect(bar->rect)
+        UI_Parent(bar)
+        {
+          ui_spacer(ui_pct(1.0,0.0));
+          UI_Flags(UI_BoxFlag_DisableTextTrunc)
+            UI_PrefWidth(ui_text_dim(0.0,1.0))
+            ui_labelf("Idle: %.2f ms (VSync/Cap)", (total_budget-(ik_state->cpu_time_us/1e6f))*1000.f);
+        }
+      }
+    }
+
     // cpu graph
     UI_WidthFill
     UI_PrefHeight(ui_em(2,0.f))
@@ -5962,15 +6017,16 @@ ik_ui_inspector(void)
           UI_PrefWidth(ui_text_dim(1, 1.0))
             ui_labelf("name");
           ui_spacer(ui_pct(1.0, 0.0));
-          // UI_PrefWidth(ui_children_sum(0.0))
-          // UI_TextAlignment(UI_TextAlign_Center)
+
+          UI_PrefWidth(ui_px(ui_top_font_size()*8, 0.0))
+          UI_TextAlignment(UI_TextAlign_Center)
           if(ui_committed(ui_line_edit(&ik_state->edit_buffer.cursor, &ik_state->edit_buffer.mark, ik_state->edit_buffer.buffer, ArrayCount(ik_state->edit_buffer.buffer), &ik_state->edit_buffer.string_size, b->name, str8_lit("name/tag"))))
           {
             U64 size = Min(ik_state->edit_buffer.string_size, ArrayCount(b->_name));
             MemoryCopy(b->_name, ik_state->edit_buffer.buffer, size);
             b->name.size = size;
             // ui_set_auto_focus_active_key(ui_key_zero());
-            // ui_set_auto_focus_hot_key(ui_key_zero());
+            ui_set_auto_focus_hot_key(ui_key_zero());
           }
           // ui_label(b->name);
         }

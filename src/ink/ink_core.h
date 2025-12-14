@@ -743,6 +743,7 @@ struct IK_State
   F32                   frame_dt;
   F32                   cpu_time_us;
   F32                   pre_cpu_time_us;
+  F32                   target_hz;
 
   // window
   Rng2F32               window_rect;
