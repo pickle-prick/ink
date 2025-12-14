@@ -797,6 +797,7 @@ struct IK_State
   String8               drag_state_data;
   Arena                 *box_scratch_arena; // e.g. edit buffer
   Rng2F32               selection_rect;
+  // per-frame selection information
   IK_Box                *first_box_selected;
   IK_Box                *last_box_selected;
   Rng2F32               selection_bounds;
@@ -926,10 +927,13 @@ internal String8 ik_get_drag_data(U64 min_required_size);
 #define ik_store_drag_struct(ptr) ik_store_drag_data(str8_struct(ptr))
 #define ik_get_drag_struct(type) ((type *)ik_get_drag_data(sizeof(type)).str)
 
-//- selecting
+//- selection
 internal inline B32 ik_is_selecting(void);
 internal void ik_selection_clear();
-#define ik_select_box() (ik_top_frame()->select)
+internal void ik_selection_push(IK_Box *box);
+internal void ik_selection_commit();
+
+#define ik_selection_box() (ik_top_frame()->select)
 
 /////////////////////////////////
 //~ Clipboard Functions

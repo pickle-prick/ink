@@ -1764,6 +1764,22 @@ ik_frame(void)
           ik_state->show_stats = !ik_state->show_stats;
           eat = 1;
         }
+        // FIXME: this is weird, maybe we should just parse events as a CommandList
+        if(evt->kind == UI_EventKind_Navigate && evt->key == OS_Key_A && (evt->modifiers&OS_Modifier_Ctrl) && evt->delta_2s32.x == 1)
+        {
+          // clear selection first
+          ik_selection_clear();
+
+          // select all
+          for(IK_Box *b = frame->box_list.first; b != 0; b = b->next)
+          {
+            if(b->group == 0)
+            {
+              ik_selection_push(b);
+            }
+          }
+          ik_selection_commit();
+        }
         if(eat) ui_eat_event_node(ik_state->events, evt_node);
       }
     }
@@ -1803,51 +1819,48 @@ ik_frame(void)
         ui_build_box_from_key(0, ui_key_zero());
     }
 
-    //- selecting and mouse release -> commit state to select box
+    //- selecting and mouse release -> commit selection state to select box
     if(ik_tool() == IK_ToolKind_Selection && ik_released(blank->sig))
     {
       if(ik_state->selected_box_count > 0)
       {
-        ik_state->focus_hot_box_key[IK_MouseButtonKind_Left] = select->key;
-        select->flags ^= IK_BoxFlag_Disabled;
-        select->group_first = 0;
-        select->group_last = 0;
-        select->group_children_count = 0;
+        AssertAlways(select->group_children_count == 0); // select state should be clean at this point
 
+        // FIXME: we should only push parent box, fine for now, since we don't have grouping right now
         for(IK_Box *child = ik_state->first_box_selected;
             child != 0;
             child = child->select_next)
         {
-          // FIXME: bug here, if child is already within a group, it can't be selected, it's parent should be selected
-          DLLPushFront_NP(select->group_first, select->group_last, child, group_next, group_prev);
-          select->group_children_count++;
-          child->group = select;
+          ik_selection_push(child);
         }
+        ik_selection_commit();
       }
     }
 
-    //- mode is not selection and select is on? -> disable select
-    // if(tool != IK_ToolKind_Selection && !(select->flags&IK_BoxFlag_Disabled))
-    // {
-    //   select->flags |= IK_BoxFlag_Disabled;
-    // }
-
-    //- select box has no group children -> mark disabled
-    if(!(select->flags&IK_BoxFlag_Disabled) && select->group_children_count == 0)
-    {
-      select->flags |= IK_BoxFlag_Disabled;
-    }
-
-    //- select box is not focused -> disable it
-    if(!ik_key_match(ik_state->focus_hot_box_key[IK_MouseButtonKind_Left], select->key))
-    {
-      select->flags |= IK_BoxFlag_Disabled;
-    }
-
-    //- select box is disabled? -> rest its state
-    if(select->flags&IK_BoxFlag_Disabled)
+    //- select box is not focused but enabled -> clear selection
+    if(!ik_key_match(ik_state->focus_hot_box_key[IK_MouseButtonKind_Left], select->key) &&
+       !(select->flags&IK_BoxFlag_Disabled))
     {
       ik_selection_clear();
+    }
+
+    //- select box is focused & enabed, but no valid selections -> clear selection
+    if(ik_key_match(ik_state->focus_hot_box_key[IK_MouseButtonKind_Left], select->key) &&
+       !(select->flags&IK_BoxFlag_Disabled))
+    {
+      B32 has_any_selection = 0;
+      for(IK_Box *b = select->group_first; b != 0; b = b->group_next)
+      {
+        if(!(b->flags&IK_BoxFlag_Disabled))
+        {
+          has_any_selection = 1;
+          break;
+        }
+      }
+      if(!has_any_selection)
+      {
+        ik_selection_clear();
+      }
     }
 
     //- select box is focused -> flag every selected box 
@@ -2249,8 +2262,8 @@ ik_frame(void)
           if(box->sig.f & IK_SignalFlag_Select && !zero_dim)
           {
             dr_rect_keyed(pad_2f32(dst, 0*ik_state->world_to_screen_ratio.x), v4f32(1,1,0,0.1), 0, 0, 0, box->key_3f32);
-            F32 border_thickness = 3*ik_state->world_to_screen_ratio.x;
-            dr_rect_keyed(pad_2f32(dst, border_thickness*2), v4f32(0.1,0,1,1), 0, border_thickness, 0, box->key_3f32);
+            F32 border_thickness = 2*ik_state->world_to_screen_ratio.x;
+            dr_rect_keyed(pad_2f32(dst, border_thickness*2), v4f32(0.1,0,0.5,1), 0, border_thickness, 0, box->key_3f32);
           }
 
           // draw key overlay
@@ -2593,6 +2606,38 @@ ik_selection_clear()
   select->group_first = 0;
   select->group_last = 0;
   select->group_children_count = 0;
+  select->flags |= IK_BoxFlag_Disabled;
+}
+
+internal void
+ik_selection_push(IK_Box *box)
+{
+  IK_Box *select = ik_selection_box();
+  // FIXME: bug here, if child is already within a group, it can't be selected, it's parent should be selected
+  DLLPushFront_NP(select->group_first, select->group_last, box, group_next, group_prev);
+  select->group_children_count++;
+  box->group = select;
+}
+
+internal void
+ik_selection_commit()
+{
+  IK_Box *select = ik_selection_box();
+  B32 select_any = 0;
+  for(IK_Box *b = select->group_first; b != 0; b = b->group_next)
+  {
+    if(!(b->flags&IK_BoxFlag_Disabled))
+    {
+      select_any = 1;
+      break;
+    }
+  }
+
+  if(select_any)
+  {
+    ik_state->focus_hot_box_key[IK_MouseButtonKind_Left] = select->key;
+    select->flags ^= IK_BoxFlag_Disabled; // enable select box
+  }
 }
 
 /////////////////////////////////
@@ -2665,7 +2710,7 @@ ik_paste()
     if(src)
     {
       IK_Box *root = 0;
-      if(src == ik_select_box())
+      if(src == ik_selection_box())
       {
         for(IK_Box *b = src->group_first, *next = 0;
             b != 0;
@@ -6733,6 +6778,7 @@ ik_ui_box_ctx_menu(void)
         }
         if(ui_clicked(ui_buttonf("delete")))
         {
+          ik_box_release(box);
           taken = 1;
         }
         if(box->flags&IK_BoxFlag_DrawImage && ui_clicked(ui_buttonf("export as png")))
