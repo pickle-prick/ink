@@ -6018,7 +6018,7 @@ ik_ui_inspector(void)
             ui_labelf("name");
           ui_spacer(ui_pct(1.0, 0.0));
 
-          UI_PrefWidth(ui_px(ui_top_font_size()*8, 0.0))
+          UI_PrefWidth(ui_px(ui_top_font_size()*8, 1.0))
           UI_TextAlignment(UI_TextAlign_Center)
           if(ui_committed(ui_line_edit(&ik_state->edit_buffer.cursor, &ik_state->edit_buffer.mark, ik_state->edit_buffer.buffer, ArrayCount(ik_state->edit_buffer.buffer), &ik_state->edit_buffer.string_size, b->name, str8_lit("name/tag"))))
           {
