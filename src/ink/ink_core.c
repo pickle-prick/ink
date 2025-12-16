@@ -1074,7 +1074,7 @@ ik_frame(void)
     {
       animation_info.hot_animation_rate     = ik_state->animation.fast_rate;
       animation_info.active_animation_rate  = ik_state->animation.fast_rate;
-      animation_info.focus_animation_rate   = 1.f;
+      animation_info.focus_animation_rate   = ik_state->animation.fast_rate;
       animation_info.tooltip_animation_rate = ik_state->animation.fast_rate;
       animation_info.menu_animation_rate    = ik_state->animation.fast_rate;
       animation_info.scroll_animation_rate  = ik_state->animation.fast_rate;
@@ -5946,7 +5946,8 @@ ik_ui_inspector(void)
       UI_PrefHeight(ui_children_sum(1.0))
       UI_Transparency(0.2)
       UI_ChildLayoutAxis(Axis2_Y)
-      UI_Flags(UI_BoxFlag_DrawBorder|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawDropShadow|UI_BoxFlag_MouseClickable)
+      // FIXME: click to focus won't work
+      UI_Flags(UI_BoxFlag_DrawBorder|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawDropShadow|UI_BoxFlag_MouseClickable|UI_BoxFlag_ClickToFocus)
       UI_CornerRadius(4.0)
       UI_Squish(1.f-open_t)
       body = ui_build_box_from_stringf(0, "###body");
@@ -6241,14 +6242,7 @@ ik_ui_inspector(void)
             ui_labelf("background_color");
           ui_spacer(ui_pct(1.0, 0.0));
           UI_PrefWidth(ui_em(3.0, 1.0))
-            UI_Column
-            UI_Padding(ui_em(0.1, 1.0))
-            UI_CornerRadius(1.f)
-            UI_Flags(UI_BoxFlag_DrawBorder|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawDropShadow)
-            UI_Palette(ui_build_palette(ui_top_palette(), .background = linear_from_srgba(b->background_color)))
-            UI_PrefWidth(ui_pct(1.0, 0.0))
-            UI_PrefHeight(ui_pct(1.0, 0.0))
-            ui_build_box_from_stringf(0, "background_clr");
+            ik_ui_hsva_picker(str8_lit("background_clr"), &b->background_color);
         }
 
         UI_WidthFill
@@ -6258,14 +6252,7 @@ ik_ui_inspector(void)
             ui_labelf("text_color");
           ui_spacer(ui_pct(1.0, 0.0));
           UI_PrefWidth(ui_em(3.0, 1.0))
-            UI_Column
-            UI_Padding(ui_em(0.1, 1.0))
-            UI_CornerRadius(1.f)
-            UI_Flags(UI_BoxFlag_DrawBorder|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawDropShadow)
-            UI_Palette(ui_build_palette(ui_top_palette(), .background = linear_from_srgba(b->text_color)))
-            UI_PrefWidth(ui_pct(1.0, 0.0))
-            UI_PrefHeight(ui_pct(1.0, 0.0))
-            ui_build_box_from_stringf(0, "text_clr");
+            ik_ui_hsva_picker(str8_lit("text_color"), &b->text_color);
         }
 
         UI_WidthFill
@@ -6275,14 +6262,17 @@ ik_ui_inspector(void)
             ui_labelf("border_color");
           ui_spacer(ui_pct(1.0, 0.0));
           UI_PrefWidth(ui_em(3.0, 1.0))
-            UI_Column
-            UI_Padding(ui_em(0.1, 1.0))
-            UI_CornerRadius(1.f)
-            UI_Flags(UI_BoxFlag_DrawBorder|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawDropShadow)
-            UI_Palette(ui_build_palette(ui_top_palette(), .background = linear_from_srgba(b->border_color)))
-            UI_PrefWidth(ui_pct(1.0, 0.0))
-            UI_PrefHeight(ui_pct(1.0, 0.0))
-            ui_build_box_from_stringf(0, "border_clr");
+            ik_ui_hsva_picker(str8_lit("border_color"), &b->border_color);
+        }
+
+        UI_WidthFill
+        UI_Row
+        {
+          UI_PrefWidth(ui_text_dim(1, 1.0))
+            ui_labelf("stroke_color");
+          ui_spacer(ui_pct(1.0, 0.0));
+          UI_PrefWidth(ui_em(3.0, 1.0))
+            ik_ui_hsva_picker(str8_lit("stroke_color"), &b->stroke_color);
         }
 
         ////////////////////////////////
@@ -6992,6 +6982,127 @@ ik_ui_version()
     UI_Flags(UI_BoxFlag_DrawText)
     UI_PrefWidth(ui_text_dim(0.0,0.0))
     ui_build_box_from_stringf(0, "%s", BUILD_TITLE_STRING_LITERAL);
+}
+
+internal void
+ik_ui_hsva_picker(String8 string, Vec4F32 *rgba)
+{
+  Vec4F32 hsva = hsva_from_rgba(*rgba);
+
+  UI_Box *container;
+  UI_PrefWidth(ui_children_sum(1.0))
+    UI_ChildLayoutAxis(Axis2_X)
+    container = ui_build_box_from_stringf(0, "%S__hsva_picker", string);
+
+  UI_Key key = ui_key_from_stringf(ui_active_seed_key(), "%S__color", string);
+  // calculate focus
+  B32 is_auto_focus_hot    = ui_is_key_auto_focus_hot(key);
+  B32 is_auto_focus_active = ui_is_key_auto_focus_active(key);
+  ui_push_focus_hot(is_auto_focus_hot ? UI_FocusKind_On : UI_FocusKind_Null);
+  ui_push_focus_active(is_auto_focus_active ? UI_FocusKind_On : UI_FocusKind_Null);
+  B32 is_focus_hot    = ui_is_focus_hot();
+  B32 is_focus_active = ui_is_focus_active();
+  B32 is_focus_hot_disabled = (!is_focus_hot && ui_top_focus_hot() == UI_FocusKind_On);
+  B32 is_focus_active_disabled = (!is_focus_active && ui_top_focus_active() == UI_FocusKind_On);
+
+  UI_Signal sig = {0};
+  ui_set_next_hover_cursor(is_focus_active ? OS_Cursor_IBar : OS_Cursor_HandPoint);
+  UI_Parent(container)
+    UI_Flags(UI_BoxFlag_DrawBorder|
+             UI_BoxFlag_DrawBackground|
+             UI_BoxFlag_DrawDropShadow|
+             UI_BoxFlag_MouseClickable|
+             ((is_auto_focus_hot || is_auto_focus_active)*UI_BoxFlag_KeyboardClickable)|
+             UI_BoxFlag_ClickToFocus)
+    UI_Palette(ui_build_palette(ui_top_palette(), .background = linear_from_srgba(*rgba)))
+    sig = ui_signal_from_box(ui_build_box_from_key(0, key));
+
+  // pop focus
+  ui_pop_focus_hot();
+  ui_pop_focus_active();
+
+  if(is_focus_hot && !is_focus_active && sig.f&(UI_SignalFlag_Clicked))
+  {
+    ui_set_auto_focus_active_key(key);
+  }
+
+  if(is_focus_active && sig.f&(UI_SignalFlag_Clicked))
+  {
+    ui_set_auto_focus_active_key(ui_key_zero());
+  }
+
+  if(sig.box->focus_active_t > 0.001)
+  {
+    UI_Box *floating_container;
+    UI_Parent(sig.box)
+      UI_Flags(UI_BoxFlag_Floating|UI_BoxFlag_DrawBorder|UI_BoxFlag_DrawBackground)
+      UI_PrefWidth(ui_em(20,1.0))
+      UI_PrefHeight(ui_children_sum(1.0))
+      // UI_PrefHeight(ui_children_sum(1.0))
+      UI_Squish(mix_1f32(1.0, 0, sig.box->focus_active_t))
+      // UI_FixedPos(mix_2f32(v2f32(0, sig.box->fixed_size.y/2.0), v2f32(sig.box->fixed_size.x+ui_top_font_size()*2, sig.box->fixed_size.y/2.0), sig.box->hot_t))
+      UI_FixedPos(v2f32(sig.box->fixed_size.x+ui_top_font_size()*2, sig.box->fixed_size.y/2.0))
+      UI_Flags(UI_BoxFlag_DrawBorder|UI_BoxFlag_DrawDropShadow|UI_BoxFlag_DrawBackground)
+      UI_ChildLayoutAxis(Axis2_Y)
+      floating_container = ui_build_box_from_stringf(0, "expanded_picker");
+
+    UI_Parent(floating_container)
+    {
+      UI_WidthFill
+      UI_PrefHeight(ui_em(15, 1.0))
+      UI_Flags(UI_BoxFlag_DrawDropShadow)
+      UI_Row
+      UI_Flags(0)
+      UI_PrefHeight(ui_pct(1.0,0.0))
+      {
+        UI_Signal sv_sig = {0};
+        UI_Signal h_sig = {0};
+        UI_Signal a_sig = {0};
+        UI_PrefWidth(ui_pct(0.8, 0.0))
+        {
+          sv_sig = ui_sat_val_pickerf(hsva.x, &hsva.y, &hsva.z, "sta_val_picker");
+        }
+        ui_spacer(ui_em(0.5f, 1.f));
+        UI_PrefWidth(ui_pct(0.1, 0.0))
+        UI_Flags(UI_BoxFlag_DrawBorder)
+        {
+          h_sig = ui_hue_pickerf(&hsva.x, hsva.y, hsva.z, "hue_picker");
+        }
+        ui_spacer(ui_em(0.5f, 1.f));
+        UI_PrefWidth(ui_pct(0.1, 0.0))
+        UI_Flags(UI_BoxFlag_DrawBorder)
+        {
+          a_sig = ui_alpha_pickerf(&hsva.w, "alpha_picker");
+        }
+      }
+
+      // UI_PrefWidth(ui_em(30,1.0))
+      UI_WidthFill
+      ui_divider(ui_em(1.0,1.0));
+
+      // rgba
+      UI_WidthFill
+        UI_Flags(UI_BoxFlag_DrawSideBottom|UI_BoxFlag_DrawDropShadow)
+        UI_Row
+        {
+          ui_labelf("rgba");
+        }
+      // hsva
+      UI_WidthFill
+        UI_Row
+        {
+          ui_labelf("hsva");
+        }
+      // hex32
+      UI_WidthFill
+        UI_Row
+        {
+          ui_labelf("hex32");
+        }
+    }
+  }
+
+  *rgba = rgba_from_hsva(hsva);
 }
 
 internal UI_Signal
