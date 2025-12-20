@@ -5564,6 +5564,24 @@ internal UI_BOX_CUSTOM_DRAW(ui_line_draw)
   dr_line(draw_data->a, draw_data->b, draw_data->stroke_color, draw_data->stroke_size, 1.0);
 }
 
+typedef struct UI_SelectionBorderDrawData UI_SelectionBorderDrawData;
+struct UI_SelectionBorderDrawData
+{
+  F32 hover_t;
+};
+internal UI_BOX_CUSTOM_DRAW(ui_selection_border_draw)
+{
+  UI_SelectionBorderDrawData *draw_data = (UI_SelectionBorderDrawData*)user_data;
+  F32 border_softness = 1.f;
+  R_Rect2DInst *inst = dr_rect(pad_2f32(box->rect, 1.f), box->palette->colors[UI_ColorCode_Border], 0, 2.f, border_softness*1.f);
+  MemoryCopyArray(inst->corner_radii, box->corner_radii);
+
+  Rng2F32 drop_shadow_rect = shift_2f32(pad_2f32(box->rect, 8), v2f32(4, 4));
+  Vec4F32 drop_shadow_color = ik_rgba_from_theme_color(IK_ThemeColor_DropShadow);
+  drop_shadow_color.w = mix_1f32(drop_shadow_color.w, 0, draw_data->hover_t);
+  dr_rect(drop_shadow_rect, drop_shadow_color, 0.8f, 0, 8.f);
+}
+
 internal void
 ik_ui_selection(void)
 {
@@ -5591,19 +5609,15 @@ ik_ui_selection(void)
     p1.y = (p1.y*0.5+0.5) * ik_state->window_dim.y + 1;
 
     Rng2F32 rect = r2f32p(p0.x, p0.y, p1.x, p1.y);
+    rect = pad_2f32(rect, mix_1f32(8, 2, box->hot_t));
     Vec2F32 center = center_2f32(rect);
     // F32 padding_px = ui_top_font_size()*0.5;
     F32 padding_px = 0.0;
     rect = pad_2f32(rect, padding_px);
     Vec2F32 rect_dim = dim_2f32(rect);
 
-    Vec4F32 background_clr = v4f32(1.0,1.0,1.0,1.0);
-    background_clr.w = mix_1f32(0.2, 0.1, box->hot_t);
-
     UI_Box *container;
     UI_Rect(rect)
-      UI_Flags(UI_BoxFlag_DrawBackground)
-      UI_Palette(ui_build_palette(ui_top_palette(), .background = background_clr))
       UI_Squish(1.0-box->focus_hot_t)
       container = ui_build_box_from_stringf(0, "###selection_box");
 
@@ -5852,11 +5866,17 @@ ik_ui_selection(void)
     /////////////////////////////////
     //~ Borders
 
+    Vec4F32 border_color = ik_rgba_from_theme_color(IK_ThemeColor_BaseBorder);
+    
     UI_Rect(rect)
-      UI_Flags(UI_BoxFlag_DrawBorder)
-      UI_Palette(ui_build_palette(ui_top_palette(), .border = ik_rgba_from_theme_color(IK_ThemeColor_BaseBackground)))
+      UI_Palette(ui_build_palette(ui_top_palette(), .border = border_color))
       UI_CornerRadius(4.f)
-      ui_build_box_from_stringf(0, "###border");
+    {
+      UI_Box *b = ui_build_box_from_stringf(0, "###border");
+      UI_SelectionBorderDrawData *draw_data = push_array(ui_build_arena(), UI_SelectionBorderDrawData, 1);
+      draw_data->hover_t = box->hot_t;
+      ui_box_equip_custom_draw(b, ui_selection_border_draw, draw_data);
+    }
 
     /////////////////////////////////
     //~ Drag Point
@@ -5946,8 +5966,7 @@ ik_ui_inspector(void)
       UI_PrefHeight(ui_children_sum(1.0))
       UI_Transparency(0.2)
       UI_ChildLayoutAxis(Axis2_Y)
-      // FIXME: click to focus won't work
-      UI_Flags(UI_BoxFlag_DrawBorder|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawDropShadow|UI_BoxFlag_MouseClickable|UI_BoxFlag_ClickToFocus)
+      UI_Flags(UI_BoxFlag_DrawBorder|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawDropShadow|UI_BoxFlag_MouseClickable|UI_BoxFlag_ClickToFocus|UI_BoxFlag_DisableFocusEffects)
       UI_CornerRadius(4.0)
       UI_Squish(1.f-open_t)
       body = ui_build_box_from_stringf(0, "###body");
@@ -5991,7 +6010,9 @@ ik_ui_inspector(void)
           UI_PrefWidth(ui_text_dim(1, 1.0))
             ui_labelf("stroke_color");
           ui_spacer(ui_pct(1.0, 0.0));
-          ik_ui_color_palette(str8_lit("stroke_clr"), stroke_colors, 3, &cfg->stroke_color);
+          // ik_ui_color_palette(str8_lit("stroke_clr"), stroke_colors, 3, &cfg->stroke_color);
+          UI_PrefWidth(ui_em(3.0, 1.0))
+            ik_ui_hsva_picker(str8_lit("stroke_clr"), &cfg->stroke_color);
         }
       }
 
@@ -6702,7 +6723,7 @@ ik_ui_inspector(void)
         }
       }
     }
-    ui_signal_from_box(body);
+    UI_Parent(body->parent) ui_signal_from_box(body);
   }
   ProfEnd();
 }
@@ -7006,20 +7027,20 @@ ik_ui_hsva_picker(String8 string, Vec4F32 *rgba)
   B32 is_focus_active_disabled = (!is_focus_active && ui_top_focus_active() == UI_FocusKind_On);
 
   UI_Signal sig = {0};
-  ui_set_next_hover_cursor(is_focus_active ? OS_Cursor_IBar : OS_Cursor_HandPoint);
+  ui_set_next_hover_cursor(OS_Cursor_HandPoint);
   UI_Parent(container)
+    UI_Transparency(0)
     UI_Flags(UI_BoxFlag_DrawBorder|
              UI_BoxFlag_DrawBackground|
              UI_BoxFlag_DrawDropShadow|
              UI_BoxFlag_MouseClickable|
-             ((is_auto_focus_hot || is_auto_focus_active)*UI_BoxFlag_KeyboardClickable)|
+             UI_BoxFlag_DrawHotEffects|
+             UI_BoxFlag_DefaultFocusNav|
+             // FIXME: do we want this behavior
+             // ((is_auto_focus_hot || is_auto_focus_active)*UI_BoxFlag_KeyboardClickable)|
              UI_BoxFlag_ClickToFocus)
     UI_Palette(ui_build_palette(ui_top_palette(), .background = linear_from_srgba(*rgba)))
     sig = ui_signal_from_box(ui_build_box_from_key(0, key));
-
-  // pop focus
-  ui_pop_focus_hot();
-  ui_pop_focus_active();
 
   if(is_focus_hot && !is_focus_active && sig.f&(UI_SignalFlag_Clicked))
   {
@@ -7046,7 +7067,13 @@ ik_ui_hsva_picker(String8 string, Vec4F32 *rgba)
       UI_ChildLayoutAxis(Axis2_Y)
       floating_container = ui_build_box_from_stringf(0, "expanded_picker");
 
+    // FIXME: visiual jitter
+    // FIXME: we would like to store this variable the first time it is opened
+    // B32 mouse_in_bottom_half = ik_state->mouse.y > ik_state->window_dim.y/2.f;
+    // if(mouse_in_bottom_half) floating_container->fixed_position.y -= floating_container->fixed_size.y;
+
     UI_Parent(floating_container)
+      UI_Focus(UI_FocusKind_Null)
     {
       UI_WidthFill
       UI_PrefHeight(ui_em(15, 1.0))
@@ -7082,25 +7109,108 @@ ik_ui_hsva_picker(String8 string, Vec4F32 *rgba)
 
       // rgba
       UI_WidthFill
-        UI_Flags(UI_BoxFlag_DrawSideBottom|UI_BoxFlag_DrawDropShadow)
+      UI_Flags(UI_BoxFlag_DrawSideBottom|UI_BoxFlag_DrawDropShadow)
+      UI_Row
+      {
+        UI_PrefWidth(ui_pct(1.0, 0.0))
+        UI_Flags(UI_BoxFlag_DrawBorder)
         UI_Row
+        UI_Flags(0)
         {
-          ui_labelf("rgba");
+          char *labels[4] = {"R", "G", "B", "A"};
+          for(U64 i = 0; i < 4; i ++)
+          {
+            U8 value_u8 = (U8)(rgba->v[i]*255);
+            String8 value_string = push_str8f(ui_build_arena(), "%u", value_u8);
+            UI_PrefWidth(ui_text_dim(0.0, 1.0))
+              ui_labelf("%s: ", labels[i]);
+            if(ui_committed(ui_line_edit(&ik_state->edit_buffer.cursor,
+                                         &ik_state->edit_buffer.mark,
+                                         ik_state->edit_buffer.buffer,
+                                         ArrayCount(ik_state->edit_buffer.buffer),
+                                         &ik_state->edit_buffer.string_size,
+                                         value_string,
+                                         push_str8f(ui_build_arena(), "RBGA_%s", labels[i]))))
+            {
+              String8 edit_string = str8(ik_state->edit_buffer.buffer, ik_state->edit_buffer.string_size);
+              if(edit_string.size > 0)
+              {
+                U8 new_value = u64_from_str8(edit_string, 10);
+                if(new_value < 255)
+                {
+                  Vec4F32 new_rgba = *rgba;
+                  new_rgba.v[i] = (F32)new_value/255.f;
+                  hsva = hsva_from_rgba(new_rgba);
+                }
+              }
+            }
+          }
         }
+      }
+
       // hsva
       UI_WidthFill
+      UI_Flags(UI_BoxFlag_DrawSideBottom|UI_BoxFlag_DrawDropShadow)
+      UI_Row
+      {
+        UI_PrefWidth(ui_pct(1.0, 0.0))
+        UI_Flags(UI_BoxFlag_DrawBorder)
         UI_Row
+        UI_Flags(0)
         {
-          ui_labelf("hsva");
+          char *labels[4] = {"H", "S", "V", "A"};
+          for(U64 i = 0; i < 4; i ++)
+          {
+            F32 value_f32 = hsva.v[i];
+            String8 value_string = push_str8f(ui_build_arena(), "%.2f", value_f32);
+            UI_PrefWidth(ui_text_dim(0.0, 1.0))
+              ui_labelf("%s: ", labels[i]);
+            if(ui_committed(ui_line_edit(&ik_state->edit_buffer.cursor,
+                                         &ik_state->edit_buffer.mark,
+                                         ik_state->edit_buffer.buffer,
+                                         ArrayCount(ik_state->edit_buffer.buffer),
+                                         &ik_state->edit_buffer.string_size,
+                                         value_string,
+                                         push_str8f(ui_build_arena(), "HSVA_%s", labels[i]))))
+            {
+              String8 edit_string = str8(ik_state->edit_buffer.buffer, ik_state->edit_buffer.string_size);
+              if(edit_string.size > 0)
+              {
+                F64 new_value = f64_from_str8(edit_string);
+                if(new_value < 1.0) hsva.v[i] = (F32)new_value;
+              }
+            }
+          }
         }
-      // hex32
+      }
+
+      // hex string
       UI_WidthFill
-        UI_Row
+        UI_Font(ik_font_from_slot(IK_FontSlot_Code))
+      {
+        String8 string = hex_string_from_rgba_4f32(ui_build_arena(), *rgba);
+        if(ui_committed(ui_line_edit(&ik_state->edit_buffer.cursor,
+                                     &ik_state->edit_buffer.mark,
+                                     ik_state->edit_buffer.buffer,
+                                     ArrayCount(ik_state->edit_buffer.buffer),
+                                     &ik_state->edit_buffer.string_size,
+                                     string,
+                                     str8_lit("hex_string"))))
         {
-          ui_labelf("hex32");
+          String8 edit_string = str8(ik_state->edit_buffer.buffer, ik_state->edit_buffer.string_size);
+          if(edit_string.size > 0)
+          {
+            Vec4F32 new_rgba = rgba_from_hex_string_4f32(edit_string);
+            hsva = hsva_from_rgba(new_rgba);
+          }
         }
+      }
     }
   }
+
+  // pop focus
+  ui_pop_focus_hot();
+  ui_pop_focus_active();
 
   *rgba = rgba_from_hsva(hsva);
 }
