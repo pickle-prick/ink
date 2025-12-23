@@ -6999,55 +6999,40 @@ ik_ui_g_ctx_menu()
 internal void
 ik_ui_cmd_palette()
 {
-#if 0
   F32 vertical_padding = ui_top_font_size()*4;
   F32 width = ui_top_font_size()*60;
-  Vec2F32 dim = {width, height};
   UI_Box *container;
   UI_FixedX(ik_state->window_dim.x/2.0-width/2.0)
     UI_FixedY(vertical_padding)
     UI_FixedWidth(width)
     UI_PrefHeight(ui_children_sum(1.0))
-    UI_Flags(UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawBorder)
+    UI_Flags(UI_BoxFlag_DrawBorder)
     UI_ChildLayoutAxis(Axis2_Y)
     UI_Transparency(0.05)
     container = ui_build_box_from_stringf(0, "###command_palette");
 
-  // search
+  // search bar
+  {
+    // TODO
+  }
 
   // item list
-  UI_Parent(container)
+  UI_ScrollAreaParams scroll_params = {0};
+  scroll_params.dim_px = v2f32(width, ui_top_font_size()*60);
+  ui_push_parent(container);
+  ui_scroll_area_begin(str8_lit(""), &scroll_params);
+  UI_WidthFill
   {
-    F32 height = ui_top_font_size() *60;
-    height = Min(height, ik_state->window_dim.y-vertical_padding*2);
-    F32 row_height_px = ui_top_px_height();
-    S64 num_possible_visible_rows = (S64)(height/row_height_px);
-    UI_ScrollPt2 scroll_pos
-
-    UI_ScrollListParams scroll_list_params = {0};
+    for(U64 i = 0; i < 90; i++)
     {
-
-      scroll_list_params.flags = UI_ScrollListFlag_All;
-      scroll_list_params.row_height_px = row_height_px;
-      scroll_list_params.dim_px = rect_dim;
-      scroll_list_params.cursor_range = r2s64(v2s64(0,0), v2s64(0,0));
-      scroll_list_params.item_range = r1s64(0, 10); // FIXME:
-      // scroll_list_params.cursor_min_is_empty_selection[Axis2_Y] = 1;
-      // scroll_list_params.row_blocks = row_blocks;
-
-      UI_ScrollListSignal scroll_list_sig = {0};
-      UI_Focus(UI_FocusKind_On)
-        UI_ScrollList(&scroll_list_params, &scroll_pos.y,
-                      0,
-                      0,
-                      &visiable_row_rng,
-                      &scroll_list_sig)
-        UI_Focus(UI_FocusKind_Null)
+      UI_Row
       {
+        ui_labelf("label_%I64u", i);
       }
     }
   }
-#endif
+  ui_scroll_area_end();
+  ui_pop_parent();
 }
 
 internal void
