@@ -641,10 +641,10 @@ ik_init(OS_Handle os_wnd, R_Handle r_wnd)
 #endif
 
   // Theme 
-  // MemoryCopy(ik_state->cfg_theme_target.colors, ik_theme_preset_colors__handmade_hero, sizeof(ik_theme_preset_colors__handmade_hero));
-  // MemoryCopy(ik_state->cfg_theme.colors, ik_theme_preset_colors__handmade_hero, sizeof(ik_theme_preset_colors__handmade_hero));
-  MemoryCopy(ik_state->cfg_theme_target.colors, ik_theme_preset_colors__four_coder, sizeof(ik_theme_preset_colors__four_coder));
-  MemoryCopy(ik_state->cfg_theme.colors, ik_theme_preset_colors__four_coder, sizeof(ik_theme_preset_colors__four_coder));
+  MemoryCopy(ik_state->cfg_theme_target.colors, ik_theme_preset_colors__handmade_hero, sizeof(ik_theme_preset_colors__handmade_hero));
+  MemoryCopy(ik_state->cfg_theme.colors, ik_theme_preset_colors__handmade_hero, sizeof(ik_theme_preset_colors__handmade_hero));
+  // MemoryCopy(ik_state->cfg_theme_target.colors, ik_theme_preset_colors__four_coder, sizeof(ik_theme_preset_colors__four_coder));
+  // MemoryCopy(ik_state->cfg_theme.colors, ik_theme_preset_colors__four_coder, sizeof(ik_theme_preset_colors__four_coder));
 
   //////////////////////////////
   //- k: compute palettes from theme
@@ -5966,28 +5966,28 @@ internal void
 ik_ui_toolbar(void)
 {
   UI_Box *container;
-  Rng2F32 rect = {0, 0, ik_state->window_dim.x, ui_top_font_size()*10};
-  UI_Rect(rect)
+  UI_FixedPos(v2f32(0, ui_top_font_size()*2))
+    UI_FixedWidth(ik_state->window_dim.x)
+    UI_PrefHeight(ui_children_sum(1.0))
     container = ui_build_box_from_stringf(0, "##toolbar_container");
 
-  F32 cell_width = ui_top_font_size()*2.5;
-  UI_Box *inner;
+  F32 cell_size = ui_top_font_size()*2.95;
+
+  UI_Box *toolbar_box;
   UI_Parent(container)
-    UI_HeightFill
     UI_WidthFill
-    UI_Column
-    UI_Padding(ui_pct(1.0, 0.0))
+    UI_PrefHeight(ui_children_sum(1.0))
     UI_Row
     UI_Padding(ui_pct(1.0, 0.0))
-    UI_Flags(UI_BoxFlag_DrawBorder|UI_BoxFlag_DrawDropShadow|UI_BoxFlag_DrawBackground)
-    UI_PrefWidth(ui_px(cell_width*IK_ToolKind_COUNT, 1.0))
-    UI_PrefHeight(ui_px(cell_width, 1.0))
+    UI_Flags(UI_BoxFlag_DrawBorder|UI_BoxFlag_DrawBackground|UI_BoxFlag_MouseClickable|UI_BoxFlag_DrawDropShadow)
+    UI_PrefWidth(ui_children_sum(1.0))
+    UI_PrefHeight(ui_children_sum(1.0))
     UI_ChildLayoutAxis(Axis2_X)
-    UI_CornerRadius(1.0f)
-    inner = ui_build_box_from_stringf(0, "###inner");
+    UI_Palette(ik_ui_palette_from_code(IK_PaletteCode_ScrollBarButton))
+    UI_CornerRadius(2.f)
+    toolbar_box = ui_build_box_from_stringf(0, "###inner");
 
-  UI_Parent(inner)
-    UI_CornerRadius(1.0f)
+  UI_Parent(toolbar_box)
   {
     String8 strs[IK_ToolKind_COUNT] =
     {
@@ -6009,22 +6009,40 @@ ik_ui_toolbar(void)
 
       UI_BoxFlags flags = UI_BoxFlag_DrawText|UI_BoxFlag_MouseClickable|UI_BoxFlag_DrawHotEffects|UI_BoxFlag_DrawActiveEffects|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawBorder;
       B32 is_active = ik_tool() == i;
-      F32 font_size = is_active ? ui_top_font_size()*1.1 : ui_top_font_size();
+      F32 active_t = ui_anim(ui_key_from_stringf(ui_key_zero(), "tool_%I64u_active_t", i), is_active, .reset = 0, .rate = ik_state->animation.vast_rate);
+      F32 font_size = is_active ? ui_top_font_size()*1.125 : ui_top_font_size();
       if(is_active)
       {
         flags |= UI_BoxFlag_DrawDropShadow;
       }
 
-      // UI_Palette(ui_build_palette(ui_top_palette(), .border = border_color, .background = bg_clr, .text = txt_clr))
       UI_Palette(is_active ? palette_reverse : palette)
         UI_FontSize(font_size)
       {
+        // FIXME: don't know what to center anchor
+        // if(is_active) ui_set_next_squish(0.1);
+
+        F32 padding_x = mix_1f32(0.f, 6.f, active_t);
+        F32 padding_y = mix_1f32(0.f, 6.f, active_t);
+
+        UI_Box *cell_box;
+        UI_PrefWidth(ui_px(cell_size, 1.0)) UI_PrefHeight(ui_px(cell_size, 1.0))
+          UI_Flags(UI_BoxFlag_DrawBorder)
+          UI_Palette(palette_reverse)
+          cell_box = ui_build_box_from_stringf(0, "###cell");
+
         // icon
-        UI_PrefWidth(ui_px(cell_width, 1.0))
-          UI_PrefHeight(ui_px(cell_width, 1.0))
+        UI_Parent(cell_box)
+          UI_WidthFill UI_HeightFill
+          UI_Column
+          UI_Padding(ui_px(padding_y,1.0))
+          UI_Row
+          UI_Padding(ui_px(padding_x,1.0))
+          UI_HeightFill UI_WidthFill
           UI_Font(ik_font_from_slot(IK_FontSlot_IconsExtra))
           UI_Flags(flags)
           UI_TextAlignment(UI_TextAlign_Center)
+          UI_CornerRadius(2.f)
           b = ui_build_box_from_string(0, strs[i]);
         UI_Signal sig = ui_signal_from_box(b);
 
@@ -6052,6 +6070,7 @@ ik_ui_toolbar(void)
       }
     }
   }
+  ui_signal_from_box(toolbar_box);
 }
 
 typedef struct UI_LineDrawData UI_LineDrawData;
@@ -6135,17 +6154,13 @@ ik_ui_selection(void)
     UI_Box *container;
     UI_Rect(rect)
       UI_Squish(1.0-box->focus_hot_t)
+      UI_Palette(ik_ui_palette_from_code(IK_PaletteCode_Tab))
       container = ui_build_box_from_stringf(0, "###selection_box");
 
     B32 is_hot = contains_2f32(rect, ui_state->mouse);
     B32 is_active = ik_key_match(ik_state->active_box_key[IK_MouseButtonKind_Left], box->key);
-    F32 hot_t = ui_anim(ui_key_from_stringf(ui_key_zero(), "selection_hot_t"), is_hot, .reset = 0, .rate = ik_state->animation.slow_rate);
-    F32 active_t = ui_anim(ui_key_from_stringf(ui_key_zero(), "selection_active_t"), is_active, .reset = 0, .rate = ik_state->animation.slow_rate);
-
-    Vec4F32 base_clr = ik_rgba_from_theme_color(IK_ThemeColor_BaseBorder);
-    Vec4F32 hot_clr = ik_rgba_from_theme_color(IK_ThemeColor_BaseBackground);
-    Vec4F32 border_clr = mix_4f32(base_clr, hot_clr, 0.8+Max(active_t, hot_t)*0.5);
-    border_clr.w = 1.0;
+    F32 hot_t = ui_anim(ui_key_from_stringf(ui_key_zero(), "selection_hot_t"), is_hot, .reset = 0, .rate = ik_state->animation.vast_rate);
+    F32 active_t = ui_anim(ui_key_from_stringf(ui_key_zero(), "selection_active_t"), is_active, .reset = 0, .rate = ik_state->animation.vast_rate);
 
     UI_SelectionDrawData *draw_data = push_array(ui_build_arena(), UI_SelectionDrawData, 1);
     draw_data->hot_t = hot_t;
@@ -6160,7 +6175,7 @@ ik_ui_selection(void)
     // }
 
     UI_Parent(container)
-      UI_Palette(ui_build_palette(ui_top_palette(), .border = border_clr, .background = ik_rgba_from_theme_color(IK_ThemeColor_Breakpoint)))
+      UI_Palette(ik_ui_palette_from_code(IK_PaletteCode_Tab))
     {
       /////////////////////////////////
       //~ Corners
@@ -6483,7 +6498,7 @@ ik_ui_inspector(void)
       UI_Column
       UI_Padding(ui_pct(1.0, 0.0))
       UI_PrefHeight(ui_children_sum(1.0))
-      UI_Transparency(0.2)
+      UI_Transparency(0.025)
       UI_ChildLayoutAxis(Axis2_Y)
       UI_Flags(UI_BoxFlag_DrawBorder|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawDropShadow|UI_BoxFlag_MouseClickable|UI_BoxFlag_ClickToFocus|UI_BoxFlag_DisableFocusEffects)
       UI_CornerRadius(4.0)
@@ -7814,7 +7829,7 @@ ik_ui_checkbox(String8 key_string, B32 b)
              UI_BoxFlag_MouseClickable|
              UI_BoxFlag_DrawHotEffects|
              UI_BoxFlag_DrawActiveEffects)
-    UI_Palette(b ? ui_top_palette() : ui_state->widget_palette_info.scrollbar_palette)
+    UI_Palette(ik_ui_palette_from_code(IK_PaletteCode_PlainButton))
     container = ui_build_box_from_string(0, key_string);
 
   if(b)
@@ -7834,12 +7849,27 @@ ik_ui_checkbox(String8 key_string, B32 b)
                UI_BoxFlag_DrawHotEffects|
                UI_BoxFlag_DrawActiveEffects|
                UI_BoxFlag_DrawDropShadow)
-      UI_Palette(ui_state->widget_palette_info.scrollbar_palette)
+      UI_Palette(ik_ui_palette_from_code(IK_PaletteCode_NegativePopButton))
       body = ui_build_box_from_stringf(0, "###body");
     sig = ui_signal_from_box(body);
   }
   else
   {
+    F32 size = mix_1f32(0.f, 12.f, container->hot_t);
+    UI_Parent(container)
+      UI_WidthFill
+      UI_HeightFill
+      UI_Column
+      UI_Padding(ui_pct(1.0, 0.0))
+      UI_Row
+      UI_Padding(ui_pct(1.0, 0.0))
+      UI_Flags(UI_BoxFlag_DrawBorder|
+               UI_BoxFlag_DrawBackground|
+               UI_BoxFlag_DrawDropShadow)
+      UI_PrefWidth(ui_px(size, 1.f))
+      UI_PrefHeight(ui_px(size, 1.f))
+      UI_Palette(ik_ui_palette_from_code(IK_PaletteCode_NegativePopButton))
+      ui_build_box_from_stringf(0, "###indicator");
     sig = ui_signal_from_box(container);
   }
 
@@ -7859,6 +7889,7 @@ ik_ui_button(String8 string)
   UI_CornerRadius(corner_radius)
     UI_Flags(UI_BoxFlag_DrawBorder|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawDropShadow)
     UI_PrefWidth(ui_children_sum(1.0))
+    UI_Palette(ik_ui_palette_from_code(IK_PaletteCode_PlainButton))
     container = ui_build_box_from_string(0, string);
 
   UI_Box *body;
@@ -7877,7 +7908,7 @@ ik_ui_button(String8 string)
              UI_BoxFlag_DrawText|
              UI_BoxFlag_DrawActiveEffects|
              UI_BoxFlag_DrawDropShadow)
-    UI_Palette(ui_state->widget_palette_info.scrollbar_palette)
+    UI_Palette(ik_ui_palette_from_code(IK_PaletteCode_NegativePopButton))
     UI_FontSize(font_size)
     UI_PrefWidth(pref_width)
     body = ui_build_box_from_string(0, string);
