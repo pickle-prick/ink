@@ -15,13 +15,17 @@ if [ -v gcc ];         then compiler="${CC:-gcc}"; echo "[gcc compile]"; fi
 auto_compile_flags=''
 if [ -v profile ];   then auto_compile_flags="-DPROFILE_SPALL=1"; echo "[profiling enabled]"; fi
 
+# --- Get Current Git Commit Id -----------------------------------------------
+git_hash=$(git describe --always --dirty)
+git_hash_full=$(git rev-parse HEAD)
+
 # --- Compile/Link Line Definitions -------------------------------------------
-clang_common='-I../src/ -I/usr/include/freetype2/ -I../simp/ -I../local/ -g -Wno-unknown-warning-option -fdiagnostics-absolute-paths -Wall -Wno-missing-braces -Wno-unused-function -Wno-writable-strings -Wno-unused-value -Wno-unused-variable -Wno-unused-local-typedef -Wno-deprecated-register -Wno-deprecated-declarations -Wno-unused-but-set-variable -Wno-single-bit-bitfield-constant-conversion -Wno-compare-distinct-pointer-types -Wno-initializer-overrides -Wno-incompatible-pointer-types-discards-qualifiers -Wno-for-loop-analysis -Xclang -flto-visibility-public-std -D_USE_MATH_DEFINES -Dstrdup=_strdup -Dgnu_printf=printf'
+clang_common="-I../src/ -I/usr/include/freetype2/ -I../simp/ -I../local/ -g -DBUILD_GIT_HASH=\"$git_hash\" -DBUILD_GIT_HASH_FULL=\"$git_hash_full\" -Wno-unknown-warning-option -fdiagnostics-absolute-paths -Wall -Wno-missing-braces -Wno-unused-function -Wno-writable-strings -Wno-unused-value -Wno-unused-variable -Wno-unused-local-typedef -Wno-deprecated-register -Wno-deprecated-declarations -Wno-unused-but-set-variable -Wno-single-bit-bitfield-constant-conversion -Wno-compare-distinct-pointer-types -Wno-initializer-overrides -Wno-incompatible-pointer-types-discards-qualifiers -Wno-for-loop-analysis -Xclang -flto-visibility-public-std -D_USE_MATH_DEFINES -Dstrdup=_strdup -Dgnu_printf=printf"
 clang_debug="$compiler -g -O0 -DBUILD_DEBUG=1 ${clang_common} ${auto_compile_flags}"
 clang_release="$compiler -g -O2 -DBUILD_DEBUG=0 ${clang_common} ${auto_compile_flags}"
 clang_link="-lpthread -lm -lrt -ldl"
 clang_out="-o"
-gcc_common='-I../src/ -I/usr/include/freetype2/ -I../simp/ -I../local/ -g -Wno-unknown-warning-option -Wall -Wno-missing-braces -Wno-unused-function -Wno-attributes -Wno-unused-value -Wno-unused-variable -Wno-unused-local-typedef -Wno-deprecated-declarations -Wno-unused-but-set-variable -Wno-compare-distinct-pointer-types -D_USE_MATH_DEFINES -Dstrdup=_strdup -Dgnu_printf=printf -fzero-init-padding-bits=unions -std=gnu17'
+gcc_common="-I../src/ -I/usr/include/freetype2/ -I../simp/ -I../local/ -g -DBUILD_GIT_HASH=\"$git_hash\" -DBUILD_GIT_HASH_FULL=\"$git_hash_full\" -Wno-unknown-warning-option -Wall -Wno-missing-braces -Wno-unused-function -Wno-attributes -Wno-unused-value -Wno-unused-variable -Wno-unused-local-typedef -Wno-deprecated-declarations -Wno-unused-but-set-variable -Wno-compare-distinct-pointer-types -D_USE_MATH_DEFINES -Dstrdup=_strdup -Dgnu_printf=printf -fzero-init-padding-bits=unions -std=gnu17"
 gcc_debug="$compiler -g3 -O0 -DBUILD_DEBUG=1 ${gcc_common} ${auto_compile_flags}"
 gcc_release="$compiler -g -O2 -DBUILD_DEBUG=0 ${gcc_common} ${auto_compile_flags}"
 gcc_link="-lpthread -lm -lrt -ldl"
@@ -52,9 +56,9 @@ mkdir -p build
 mkdir -p local
 
 # --- Build & Run Metaprogram -------------------------------------------------
-if [ -v no_meta ]; then echo "[skipping metagen]"; fi
-if [ ! -v no_meta ]
+if [ -v meta ]
 then
+  echo "[doing metagen]"
   cd build
   $compile_debug ../simp/metagen/metagen_main.c $compile_link $out metagen
   ./metagen src
@@ -63,8 +67,9 @@ then
 fi
 
 # --- Pack Fonts ---------------------------------------------------------------
-if [ ! -v no_meta ]
+if [ -v bake ]
 then
+  echo "[baking font]"
   font_in_dir="./data/fonts"
   font_out_dir="./local"
   for font in "${font_in_dir}"/*.{ttf,}; do
@@ -80,8 +85,9 @@ then
 fi
 
 # --- Compile Shaders ---------------------------------------------------------
-if [ -v no_shader ]; then echo "[skipping shader]"; fi
-if [ ! -v no_shader ]; then
+if [ -v shader ]
+then
+  echo "[compiling shader]"
   shader_in_dir="./simp/render/vulkan/shader"
   shader_out_dir="./simp/render/vulkan/shader"
   for shader in "${shader_in_dir}"/*.{vert,frag,comp}; do
@@ -97,8 +103,11 @@ if [ ! -v no_shader ]; then
       echo "Compiling ${shader} -> ${spv_out}"
       glslc "$shader" -o "$spv_out"
 
-      echo "Embedding ${spv_out} -> ${header_out}"
-      xxd -i -n "${name}_${extension}_spv" "$spv_out" > "$header_out"
+      if [ -v bake ]
+      then
+        echo "Embedding ${spv_out} -> ${header_out}"
+        xxd -i -n "${name}_${extension}_spv" "$spv_out" > "$header_out"
+      fi
     fi
   done
 fi

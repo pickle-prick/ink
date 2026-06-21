@@ -97,8 +97,8 @@ for /f %%i in ('call git rev-parse HEAD')              do set compile=%compile% 
 :: --- Compile Shader ---------------------------------------------------------
 set shader_in_dir=%~dp0\simp\render\vulkan\shader
 set shader_out_dir=%~dp0\simp\render\vulkan\shader
-if "%no_shader%"=="1" echo [skipping shader compiling]
-if not "%no_shader%"=="1" (
+if "%shader%"=="1" (
+  echo [compiling shader]
   for %%G in ("%shader_in_dir%\*.vert" "%shader_in_dir%\*.frag" "%shader_in_dir%\*.comp") do (
     if exist "%%G" (
       set "shader=%%G"
@@ -115,16 +115,18 @@ if not "%no_shader%"=="1" (
         echo Compiling !shader! to !spv_out!
         glslc "!shader!" -o "!spv_out!"
 
-        echo Embedding !spv_out! to !header_out!
-        xxd -i -n "!name!_!extension!_spv" "!spv_out!" > "!header_out!"
+        if "%bake%"=="1" (
+          echo Embedding !spv_out! to !header_out!
+          xxd -i -n "!name!_!extension!_spv" "!spv_out!" > "!header_out!"
+        )
       )
     )
   )
 )
 
 :: --- Build & Run Metaprogram ------------------------------------------------
-if "%no_meta%"=="1" echo [skipping metagen]
-if not "%no_meta%"=="1" (
+if "%meta%"=="1" (
+  echo [doing metagen]
   pushd build
   %compile_debug% ..\simp\metagen\metagen_main.c %compile_link% %out%metagen.exe || exit /b 1
   metagen.exe src || exit /b 1
@@ -133,7 +135,8 @@ if not "%no_meta%"=="1" (
 )
 
 :: --- Pack Fonts -------------------------------------------------------------
-if not "%no_meta%"=="1" (
+if "%bake%"=="1" (
+  echo [baking fonts]
   set font_in_dir=%~dp0\data\fonts
   set font_out_dir=%~dp0\local
   for %%G in (!font_in_dir!\*.ttf) do (
@@ -151,6 +154,6 @@ popd
 
 :: --- Warn On No Builds ------------------------------------------------------
 if "%didbuild%"=="" (
-  echo [WARNING] no valid build target specified; must use build target names as arguments to this script, like `build rubik`.
+  echo [WARNING] no valid build target specified; must use build target names as arguments to this script, like `build ink`.
   exit /b 1
 )
