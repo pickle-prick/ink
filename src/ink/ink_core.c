@@ -811,6 +811,8 @@ ik_kill_focus(void)
 internal B32
 ik_frame(void)
 {
+  /////////////////////////////////
+
   ProfBeginFunction();
   Temp scratch = scratch_begin(0,0);
 
@@ -1189,7 +1191,8 @@ ik_frame(void)
   ////////////////////////////////
   //~ Build Debug UI
 
-  ik_ui_cmd_palette();
+  // FIXME: potential performance issues
+  // ik_ui_cmd_palette();
   ik_ui_man_page();
   ik_ui_toolbar();
   ik_ui_bottom_bar();
@@ -1382,25 +1385,35 @@ ik_frame(void)
       IK_Box *root = roots[i];
       for(IK_Box *box = root, *next = 0; box != 0; box = next)
       {
-        next = box->prev;
+        next = box->list_prev;
+        if(box->flags&IK_BoxFlag_Deleted) continue;
         box->sig = ik_signal_from_box(box);
 
         /////////////////////////////////
         // Handle deletion
 
         B32 delete = 0;
+        B32 capture = 0;
         if(!ik_key_match(box->key, ik_state->focus_active_box_key) && box->flags&IK_BoxFlag_PruneZeroText && box->string.size == 0)
         {
           delete = 1;
         }
         if(box->sig.f&IK_SignalFlag_Delete)
         {
+          capture = 1;
           delete = 1;
         }
 
         if(delete)
         {
-          ik_box_release(box);
+          if(capture)
+          {
+            ik_box_captured_release(box);
+          }
+          else
+          {
+            ik_box_release(box, 1);
+          }
           continue;
         }
 
@@ -1460,6 +1473,7 @@ ik_frame(void)
             IK_BoxDrag drag = {ik_rect_from_box(box), ik_state->mouse, ik_state->mouse_in_world, 0};
             ik_store_drag_struct(&drag);
             ik_state->action_slot = IK_ActionSlot_Center;
+            ik_box_action_capture(box);
           }
           else if(ik_state->action_slot == IK_ActionSlot_Center)
           {
@@ -1585,12 +1599,13 @@ ik_frame(void)
       IK_Box *root = roots[i];
       for(IK_Box *box = root, *next = 0; box != 0; box = next)
       {
-        next = box->prev;
+        next = box->list_prev;
+        if(box->flags&IK_BoxFlag_Deleted) continue;
 
         if(box->flags&IK_BoxFlag_FitChildren)
         {
           Rng2F32 bounds = {inf32(), inf32(), neg_inf32(), neg_inf32()};
-          for(IK_Box *child = box->group_first; child != 0; child = child->group_next)
+          for(IK_Box *child = box->first; child != 0; child = child->next)
           {
             Rng2F32 rect = ik_rect_from_box(child);
             bounds.x0 = Min(rect.x0, bounds.x0);
@@ -1613,7 +1628,7 @@ ik_frame(void)
       if(!ik_key_match(ik_state->active_box_key[k], ik_key_zero()))
       {
         IK_Box *box = ik_box_from_key(ik_state->active_box_key[k]);
-        if(box && box->flags&IK_BoxFlag_Disabled)
+        if(box && box->flags&(IK_BoxFlag_Disabled|IK_BoxFlag_Deleted))
         {
           ik_state->active_box_key[k] = ik_key_zero();
         }
@@ -1628,7 +1643,7 @@ ik_frame(void)
       if(!ik_key_match(ik_state->focus_hot_box_key[k], ik_key_zero()))
       {
         IK_Box *box = ik_box_from_key(ik_state->focus_hot_box_key[k]);
-        if(box && box->flags&IK_BoxFlag_Disabled)
+        if(box && (box->flags&(IK_BoxFlag_Disabled|IK_BoxFlag_Deleted)))
         {
           ik_state->focus_hot_box_key[k] = ik_key_zero();
         }
@@ -1778,15 +1793,26 @@ ik_frame(void)
           ik_selection_clear();
 
           // select all
-          for(IK_Box *b = frame->box_list.first; b != 0; b = b->next)
+          for(IK_Box *b = frame->box_list.first; b != 0; b = b->list_next)
           {
-            if(b->group == 0)
+            if(b->parent == 0)
             {
               ik_selection_push(b);
             }
           }
           ik_selection_commit();
         }
+        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_Z && (evt->modifiers & OS_Modifier_Ctrl))
+        {
+          ik_undo();
+          eat = 1;
+        }
+        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_R && (evt->modifiers & OS_Modifier_Ctrl))
+        {
+          eat = 1;
+          ik_redo();
+        }
+
         if(eat) ui_eat_event_node(ik_state->events, evt_node);
       }
     }
@@ -1831,7 +1857,7 @@ ik_frame(void)
     {
       if(ik_state->selected_box_count > 0)
       {
-        AssertAlways(select->group_children_count == 0); // select state should be clean at this point
+        AssertAlways(select->children_count == 0); // select state should be clean at this point
 
         // FIXME: we should only push parent box, fine for now, since we don't have grouping right now
         for(IK_Box *child = ik_state->first_box_selected;
@@ -1856,9 +1882,9 @@ ik_frame(void)
        !(select->flags&IK_BoxFlag_Disabled))
     {
       B32 has_any_selection = 0;
-      for(IK_Box *b = select->group_first; b != 0; b = b->group_next)
+      for(IK_Box *b = select->first; b != 0; b = b->next)
       {
-        if(!(b->flags&IK_BoxFlag_Disabled))
+        if(!(b->flags&(IK_BoxFlag_Disabled|IK_BoxFlag_Deleted)))
         {
           has_any_selection = 1;
           break;
@@ -1873,7 +1899,7 @@ ik_frame(void)
     //- select box is focused -> flag every selected box 
     if(ik_key_match(ik_state->focus_hot_box_key[IK_MouseButtonKind_Left], select->key))
     {
-      for(IK_Box *child = select->group_first; child != 0; child = child->group_next)
+      for(IK_Box *child = select->first; child != 0; child = child->next)
       {
         child->sig.f |= IK_SignalFlag_Select;
       }
@@ -2053,7 +2079,8 @@ ik_frame(void)
       IK_Box *root = roots[i];
       for(IK_Box *box = root, *next = 0; box != 0; box = next)
       {
-        next = box->prev;
+        next = box->list_prev;
+        if(box->flags&IK_BoxFlag_Deleted) continue;
         B32 is_active = ik_key_match(ik_state->active_box_key[IK_MouseButtonKind_Left], box->key);
 
         //- top left dragged? -> offset position by rect size delta
@@ -2155,13 +2182,14 @@ ik_frame(void)
       Swap(IK_Box*, roots[0], roots[1]);
     }
 
+    // loop through all boxes, and draw it
     for(U64 i = 0; i < ArrayCount(roots); i++)
     {
       IK_Box *root = roots[i];
       for(IK_Box *box = root, *next = 0; box != 0; box = next)
       {
-        next = box->next;
-        if(ik_state->frame_index >= box->draw_frame_index)
+        next = box->list_next;
+        if(ik_state->frame_index >= box->draw_frame_index && !(box->flags&IK_BoxFlag_Deleted))
         {
           Rng2F32 dst = ik_rect_from_box(box);
           Vec2F32 center = center_2f32(dst);
@@ -2600,20 +2628,20 @@ ik_selection_clear()
 {
   IK_Frame *frame = ik_top_frame();
   IK_Box *select = frame->select;
-  for(IK_Box *child = select->group_first, *next = 0;
+  for(IK_Box *child = select->first, *next = 0;
       child != 0;
       child = next)
   {
-    next = child->group_next;
-    child->group = 0;
-    child->group_next = 0;
-    child->group_prev = 0;
+    next = child->next;
+    child->parent = 0;
+    child->next = 0;
+    child->prev = 0;
   }
 
   select->rect_size = v2f32(0,0);
-  select->group_first = 0;
-  select->group_last = 0;
-  select->group_children_count = 0;
+  select->first = 0;
+  select->last = 0;
+  select->children_count = 0;
   select->flags |= IK_BoxFlag_Disabled;
 }
 
@@ -2622,16 +2650,18 @@ ik_selection_push(IK_Box *box)
 {
   IK_Box *select = ik_selection_box();
   // FIXME: bug here, if child is already within a group, it can't be selected, it's parent should be selected
-  DLLPushFront_NP(select->group_first, select->group_last, box, group_next, group_prev);
-  select->group_children_count++;
-  box->group = select;
+  // FIXME: bug here, selection could be cleared, but all box selected are captured, but still point to select box
+  // AssertAlways(box->parent == 0);
+  DLLPushFront(select->first, select->last, box);
+  select->children_count++;
+  box->parent = select;
 }
 
 internal void
 ik_selection_commit()
 {
   IK_Box *select = ik_selection_box();
-  if(select->group_children_count > 0)
+  if(select->children_count > 0)
   {
     ik_state->focus_hot_box_key[IK_MouseButtonKind_Left] = select->key;
     select->flags ^= IK_BoxFlag_Disabled; // enable select box
@@ -2710,14 +2740,14 @@ ik_paste()
       IK_Box *root = 0;
       if(src == ik_selection_box())
       {
-        for(IK_Box *b = src->group_first, *next = 0;
+        for(IK_Box *b = src->first, *next = 0;
             b != 0;
             b = next)
         {
-          next = b->group_next;
+          next = b->next;
           IK_Box *cloned = ik_box_clone(b);
-          DLLInsert_NP(src->group_first, src->group_last, b, cloned, group_next, group_prev);
-          DLLRemove_NP(src->group_first, src->group_last, b, group_next, group_prev);
+          DLLInsert(src->first, src->last, b, cloned);
+          DLLRemove(src->first, src->last, b);
         }
         root = src;
       }
@@ -3031,28 +3061,28 @@ ik_string_block_release(String8 string)
 /////////////////////////////////
 //~ Box Type Functions
 
-// internal IK_BoxRec
-// ik_box_rec_df(IK_Box *box, IK_Box *root, U64 sib_member_off, U64 child_member_off)
-// {
-//   // depth first search starting from the current box 
-//   IK_BoxRec result = {0};
-//   result.next = 0;
-//   if((*MemberFromOffset(IK_Box **, box, child_member_off)) != 0)
-//   {
-//     result.next = *MemberFromOffset(IK_Box **, box, child_member_off);
-//     result.push_count = 1;
-//   }
-//   else for(IK_Box *p = box; p != 0 && p != root; p = p->parent)
-//   {
-//     if((*MemberFromOffset(IK_Box **, p, sib_member_off)) != 0)
-//     {
-//       result.next = *MemberFromOffset(IK_Box **, p, sib_member_off);
-//       break;
-//     }
-//     result.pop_count += 1;
-//   }
-//   return result;
-// }
+internal IK_BoxRec
+ik_box_rec_df(IK_Box *box, IK_Box *root, U64 sib_member_off, U64 child_member_off)
+{
+  // depth first search starting from the current box 
+  IK_BoxRec result = {0};
+  result.next = 0;
+  if((*MemberFromOffset(IK_Box **, box, child_member_off)) != 0)
+  {
+    result.next = *MemberFromOffset(IK_Box **, box, child_member_off);
+    result.push_count = 1;
+  }
+  else for(IK_Box *p = box; p != 0 && p != root; p = p->parent)
+  {
+    if((*MemberFromOffset(IK_Box **, p, sib_member_off)) != 0)
+    {
+      result.next = *MemberFromOffset(IK_Box **, p, sib_member_off);
+      break;
+    }
+    result.pop_count += 1;
+  }
+  return result;
+}
 
 /////////////////////////////////
 //~ Frame Building API
@@ -3083,8 +3113,8 @@ ik_frame_alloc()
   Arena *arena = frame->arena;
 
   // alloc action ring buffer
-  frame->action_ring.slot_count = 1024;
-  frame->action_ring.slots = push_array(arena, IK_Action, frame->action_ring.slot_count);
+  frame->box_action_ring.slot_count = 1024;
+  frame->box_action_ring.slots = push_array(arena, IK_BoxAction, frame->box_action_ring.slot_count);
 
   /////////////////////////////////
   //~ Fill default settings
@@ -3165,24 +3195,33 @@ ik_cfg_default()
 /////////////////////////////////
 //- box node construction
 
+
+internal IK_Box *
+ik_box_alloc()
+{
+  IK_Frame *frame = ik_top_frame();
+  IK_Box *ret = frame->first_free_box;
+  if(ret != 0)
+  {
+    SLLStackPop_N(frame->first_free_box, free_next);
+  }
+  else
+  {
+    ret = push_array_no_zero(frame->arena, IK_Box, 1);
+  }
+  MemoryZeroStruct(ret);
+  return ret;
+}
+
 internal IK_Box *
 ik_build_box_from_key_(IK_BoxFlags flags, IK_Key key, B32 pre_order)
 {
   ProfBeginFunction();
 
   IK_Frame *frame = ik_top_frame();
-  IK_Box *box = frame->first_free_box;
-  if(box != 0)
-  {
-    SLLStackPop(frame->first_free_box);
-  }
-  else
-  {
-    box = push_array_no_zero(frame->arena, IK_Box, 1);
-  }
-  MemoryZeroStruct(box);
+  IK_Box *box = ik_box_alloc();
 
-  IK_Box *group_parent = ik_top_group_parent();
+  IK_Box *parent = ik_top_parent();
 
   IK_Palette *palette = ik_top_palette();
   // fill box info
@@ -3214,19 +3253,19 @@ ik_build_box_from_key_(IK_BoxFlags flags, IK_Key key, B32 pre_order)
     IK_BoxList *list = &frame->box_list;
     if(pre_order)
     {
-      DLLPushBack(list->first, list->last, box);
+      DLLPushBack_NP(list->first, list->last, box, list_next, list_prev);
     }
     else
     {
-      DLLPushFront(list->first, list->last, box);
+      DLLPushFront_NP(list->first, list->last, box, list_next, list_prev);
     }
     list->count++;
   }
 
-  if(group_parent)
+  if(parent)
   {
-    DLLPushBack_NP(group_parent->group_first, group_parent->group_last, box, group_next, group_prev);
-    group_parent->group_children_count++;
+    DLLPushBack(parent->first, parent->last, box);
+    parent->children_count++;
   }
 
   ProfEnd();
@@ -3263,17 +3302,19 @@ ik_build_box_from_stringf(IK_BoxFlags flags, char *fmt, ...)
 internal IK_Box *
 ik_box_clone(IK_Box *src)
 {
+  // FIXME: this is fucking stupid, clean this mess
   Temp scratch = scratch_begin(0,0);
 
-  IK_Box *group_parent = ik_top_group_parent();
+  IK_Box *parent = ik_top_parent();
   IK_Box *ret = 0;
   if(!(src->flags&IK_BoxFlag_Transparent))
   {
     IK_BoxFlags flags = src->flags;
     String8 src_name = ik_display_part_from_key_string(src->name);
+    // create a different key name
     String8 dst_name = push_str8f(scratch.arena, "%S###%I64u", src_name, os_now_microseconds());
     ret = ik_build_box_from_string(flags, dst_name);
-    group_parent = ret;
+    parent = ret;
 
     // fill info
     ret->position          = src->position;
@@ -3312,7 +3353,7 @@ ik_box_clone(IK_Box *src)
   }
 
   // recursive
-  IK_GroupParent_Scope(group_parent) for(IK_Box *c = src->group_first; c != 0; c = c->group_next)
+  IK_Parent_Scope(parent) for(IK_Box *c = src->first; c != 0; c = c->next)
   {
     ik_box_clone(c);
   }
@@ -3322,24 +3363,27 @@ ik_box_clone(IK_Box *src)
 
 //- box node destruction
 internal void
-ik_box_release(IK_Box *box)
-{ 
+ik_box_release(IK_Box *box, B32 recursive)
+{
   IK_Frame *frame = box->frame;
-  IK_Box *group = box->group;
+  IK_Box *parent = box->parent;
 
-  // recursively remove group children first
-  for(IK_Box *c = box->group_first, *next = 0; c != 0; c = next)
+  // recursively remove children first
+  if(recursive)
   {
-    next = c->group_next;
-    ik_box_release(c);
+    for(IK_Box *c = box->first, *next = 0; c != 0; c = next)
+    {
+      next = c->next;
+      ik_box_release(c, recursive);
+    }
   }
 
   if(box->flags&IK_BoxFlag_Transparent) return;
 
-  if(group)
+  if(parent)
   {
-    DLLRemove(group->group_first, group->group_last, box);
-    group->group_children_count--;
+    DLLRemove(parent->first, parent->last, box);
+    parent->children_count--;
   }
 
   /////////////////////////////////
@@ -3370,7 +3414,7 @@ ik_box_release(IK_Box *box)
 
   // remove from box list
   IK_BoxList *list = &frame->box_list;
-  DLLRemove(list->first, list->last, box);
+  DLLRemove_NP(list->first, list->last, box, list_next, list_prev);
   list->count--;
 
   // remove from lookup table
@@ -3379,7 +3423,19 @@ ik_box_release(IK_Box *box)
   DLLRemove_NP(slot->hash_first, slot->hash_last, box, hash_next, hash_prev);
 
   // push to free list stack
-  SLLStackPush(frame->first_free_box, box);
+  SLLStackPush_N(frame->first_free_box, box, free_next);
+}
+
+internal void
+ik_box_captured_release(IK_Box *box)
+{
+  IK_BoxAction *action = ik_box_action_capture(box);
+  for(IK_Box *b = action->first_captured;
+      b != 0;
+      b = b->capture_next)
+  {
+    b->capture_source->flags |= IK_BoxFlag_Deleted;
+  }
 }
 
 /////////////////////////////////
@@ -3466,6 +3522,8 @@ IK_BOX_UPDATE(text)
       // perform replace range
       if(!txt_pt_match(op.range.min, op.range.max) || op.replace.size != 0)
       {
+        // FIXME: bug here, also we shouldn't capture every time user type a character, maybe on word boundary
+        // ik_box_action_capture(box);
         String8 new_string = ui_push_string_replace_range(scratch.arena, box->string, r1s64(op.range.min.column, op.range.max.column), op.replace);
         ik_box_equip_display_string(box, new_string);
       }
@@ -4392,9 +4450,9 @@ ik_box_do_scale(IK_Box *box, Vec2F32 scale, Vec2F32 origin)
     }
   }
 
-  for(IK_Box *child = box->group_first;
+  for(IK_Box *child = box->first;
       child != 0;
-      child = child->group_next)
+      child = child->next)
   {
     ik_box_do_scale(child, scale, origin);
   }
@@ -4415,9 +4473,9 @@ ik_box_do_translate(IK_Box *box, Vec2F32 translate)
     }
   }
 
-  for(IK_Box *child = box->group_first;
+  for(IK_Box *child = box->first;
       child != 0;
-      child = child->group_next)
+      child = child->next)
   {
     ik_box_do_translate(child, translate);
   }
@@ -4428,94 +4486,212 @@ ik_box_do_translate(IK_Box *box, Vec2F32 translate)
 
 //- ring buffer operations
 
-internal IK_Action *
-ik_action_ring_write()
+internal IK_BoxAction *
+ik_box_action_ring_push()
 {
-  IK_Frame *frame = ik_top_frame();
-  IK_ActionRing *ring = &frame->action_ring;
+  IK_BoxActionRing *ring = &ik_top_frame()->box_action_ring;
 
   U64 next_head = (ring->head+1) % ring->slot_count;
   U64 next_tail = ring->tail;
 
-  U64 written = 1;
-  if(ring->write_count > 0 && ring->head == ring->tail)
+  if(next_head == ring->tail)
   {
-    next_tail = ring->head;
-    written = 0;
+    next_tail = (ring->tail+1) % ring->slot_count;
+    ik_box_action_slot_reset(&ring->slots[ring->tail]);
   }
 
-  IK_Action *ret = &ring->slots[ring->head];
-  // commit head&tail
-  ring->mark = ring->head;
+  // head != mark? -> reset slots between
+  for(U64 i = ring->head; i != ring->mark; i = ((i+1)%ring->slot_count))
+  {
+    ik_box_action_slot_reset(&ring->slots[i]);
+  }
+
+  IK_BoxAction *ret = &ring->slots[ring->head];
+
+  // commit new pos
   ring->head = next_head;
+  ring->mark = ring->head;
   ring->tail = next_tail;
-  ring->write_count += written;
+
   return ret;
 }
 
-internal IK_Action *
-ik_action_ring_backward()
+internal IK_BoxAction *
+ik_box_action_ring_backward()
 {
-  IK_Frame *frame = ik_top_frame();
-  IK_ActionRing *ring = &frame->action_ring;
-
-  IK_Action *ret = 0;
-  U64 next_head = (ring->head-1) % ring->slot_count;
-  if(ring->write_count > 0)
+  IK_BoxActionRing *ring = &ik_top_frame()->box_action_ring;
+  IK_BoxAction *ret = 0;
+  if(ring->head != ring->tail)
   {
-    ret = &ring->slots[next_head];
-    // commit head
+    U64 next_head = (ring->head+ring->slot_count-1)%ring->slot_count;
     ring->head = next_head;
-    ring->write_count--;
+    ret = &ring->slots[ring->head];
   }
   return ret;
 }
 
-internal IK_Action *
-ik_action_ring_forward()
+internal IK_BoxAction *
+ik_box_action_ring_forward()
 {
-  IK_Frame *frame = ik_top_frame();
-  IK_ActionRing *ring = &frame->action_ring;
-  IK_Action *ret = 0;
-  U64 next_head = (ring->head+1) % ring->slot_count;
-  U64 marked_head = (ring->mark+1) % ring->slot_count;
-  if(marked_head != next_head)
+  IK_BoxActionRing *ring = &ik_top_frame()->box_action_ring;
+  IK_BoxAction *ret = 0;
+  if(ring->head != ring->mark)
   {
     ret = &ring->slots[ring->head];
+    U64 next_head = (ring->head+1)%ring->slot_count;
     ring->head = next_head;
-    ring->write_count++;
   }
   return ret;
 }
 
-//- action undo/redo
-
 internal void
-ik_action_undo(IK_Action *action)
+ik_box_action_slot_reset(IK_BoxAction *slot)
 {
-  switch(action->kind)
+  for(IK_Box *box = slot->first_captured; box != 0; box = box->capture_next)
   {
-    case IK_ActionKind_Create:
+    // release string block
+    if(box->string.size > 0) 
     {
-      for(IK_Box *box = action->v.create.first, *next = 0; box != 0; box = next)
-      {
-        // next = box->create_next;
-        // FIXME: soft delete
-      }
-    }break;
-    case IK_ActionKind_Delete:
+      ik_string_block_release(box->string);
+    }
+
+    // release image
+    if(box->image)
     {
-      for(IK_Box *box = action->v.create.first, *next = 0; box != 0; box = next)
+      box->image->rc--;
+      // TODO(Next): if image rc is 0, we may want to release it
+    }
+
+    // release points
+    if(box->first_point)
+    {
+      for(IK_Point *p = box->first_point, *next = 0; p != 0; p = next)
       {
-        // next = box->delete_next;
-        // FIXME: create
+        next = p->next;
+        ik_point_release(p);
       }
-    }break;
-    default:{}break;
+    }
+
+    // FIXME: if this action is delete, we remove the source box from the frame too
+    IK_Frame *frame = box->frame;
+    SLLStackPush_N(frame->first_free_box, box, free_next);
   }
+  MemoryZeroStruct(slot);
+}
+
+internal IK_BoxAction *
+ik_box_action_capture(IK_Box *box)
+{
+  Assert(box);
+  IK_BoxAction *action = ik_box_action_ring_push();
+  Assert(action->first_captured == 0);
+  IK_Box *b = box;
+  while(b)
+  {
+    IK_BoxRec rec = ik_box_rec_df_pre(b, box);
+
+    Assert(b->capture_next == 0);
+    Assert(b->capture_source == 0);
+    Assert(!(b->flags&IK_BoxFlag_Deleted));
+
+    if(!(b->flags&IK_BoxFlag_Transparent))
+    {
+      IK_Box *captured = ik_box_alloc();
+      MemoryCopy(captured, b, sizeof(IK_Box));
+      captured->capture_source = b;
+
+      // deep copy string block
+      if(captured->string.size > 0) captured->string = ik_push_str8_copy(captured->string);
+
+      // increase image rc
+      if(captured->image) captured->image->rc++;
+
+      // clone point data
+      captured->first_point = 0;
+      captured->last_point = 0;
+      captured->point_count = 0;
+      for(IK_Point *point = b->first_point;
+          point != 0;
+          point = point->next)
+      {
+        IK_Point *dst = ik_point_alloc();
+        dst->position = point->position;
+        DLLPushBack(captured->first_point, captured->last_point, dst);
+        captured->point_count++;
+      }
+      Assert(captured->point_count == b->point_count);
+      SLLStackPush_N(action->first_captured, captured, capture_next);
+    }
+    b = rec.next;
+  }
+  return action;
 }
 
 //- state undo/redo
+
+internal B32
+ik_undo()
+{
+  B32 ret = 0;
+  IK_BoxAction *last = ik_box_action_ring_backward();
+  if(last)
+  {
+    for(IK_Box *b = last->first_captured, *next = 0; b != 0; b = next)
+    {
+      next = b->capture_next;
+
+      IK_Box *source = b->capture_source;
+      Assert(source);
+
+      b->capture_next = 0;
+      b->capture_source = 0;
+
+      IK_Box temp = {0};
+      MemoryCopy(&temp, b, sizeof(IK_Box)); // b -> tmep
+      MemoryCopy(b, source, sizeof(IK_Box)); // source -> b
+      MemoryCopy(source, &temp, sizeof(IK_Box)); // temp -> source
+
+      b->capture_source = source;
+      b->capture_next = next;
+
+      source->draw_frame_index = ik_state->frame_index+1;
+    }
+    ret = 1;
+  }
+  return ret;
+}
+
+internal B32
+ik_redo()
+{
+  B32 ret = 0;
+  IK_BoxAction *next = ik_box_action_ring_forward();
+  if(next)
+  {
+    for(IK_Box *b = next->first_captured, *next = 0; b != 0; b = next)
+    {
+      next = b->capture_next;
+
+      IK_Box *source = b->capture_source;
+      Assert(source);
+
+      b->capture_next = 0;
+      b->capture_source = 0;
+
+      IK_Box temp = {0};
+      MemoryCopy(&temp, b, sizeof(IK_Box)); // b -> tmep
+      MemoryCopy(b, source, sizeof(IK_Box)); // source -> b
+      MemoryCopy(source, &temp, sizeof(IK_Box)); // temp -> source
+
+      b->capture_source = source;
+      b->capture_next = next;
+
+      source->draw_frame_index = ik_state->frame_index+1;
+    }
+    ret = 1;
+  }
+  return ret;
+}
 
 /////////////////////////////////
 //~ Point Function
@@ -5704,6 +5880,7 @@ ik_ui_selection(void)
               ik_state->hot_box_key = box->key;
               ik_state->action_slot = IK_ActionSlot_TopLeft;
               ik_state->active_box_key[IK_MouseButtonKind_Left] = box->key;
+              ik_box_action_capture(box);
             }
             else
             {
@@ -5821,6 +5998,7 @@ ik_ui_selection(void)
               ik_state->hot_box_key = box->key;
               ik_state->action_slot = IK_ActionSlot_DownRight;
               ik_state->active_box_key[IK_MouseButtonKind_Left] = box->key;
+              ik_box_action_capture(box);
             }
             else
             {
@@ -5917,6 +6095,7 @@ ik_ui_selection(void)
           {
             if(ui_pressed(sig))
             {
+              ik_box_action_capture(box);
               ui_store_drag_struct(&p->position);
             }
             else
@@ -6129,11 +6308,11 @@ ik_ui_inspector(void)
             UI_PrefWidth(ui_text_dim(1, 1.0))
             if(ui_clicked(ik_ui_buttonf("+")))
             {
-              IK_Box *next = b->next;
+              IK_Box *next = b->list_next;
               if(next)
               {
-                DLLRemove(frame->box_list.first, frame->box_list.last, b);
-                DLLInsert(frame->box_list.first, frame->box_list.last, next, b);
+                DLLRemove_NP(frame->box_list.first, frame->box_list.last, b, list_next, list_prev);
+                DLLInsert_NP(frame->box_list.first, frame->box_list.last, next, b, list_next, list_prev);
               }
             }
 
@@ -6143,11 +6322,11 @@ ik_ui_inspector(void)
             if(ui_clicked(ik_ui_buttonf("-")))
             {
               IK_Box *prev = b;
-              for(U64 i = 0; i < 2 && prev != 0; i++, prev = prev->prev);
+              for(U64 i = 0; i < 2 && prev != 0; i++, prev = prev->list_prev);
               if(prev)
               {
-                DLLRemove(frame->box_list.first, frame->box_list.last, b);
-                DLLInsert(frame->box_list.first, frame->box_list.last, prev, b);
+                DLLRemove_NP(frame->box_list.first, frame->box_list.last, b, list_next, list_prev);
+                DLLInsert_NP(frame->box_list.first, frame->box_list.last, prev, b, list_next, list_prev);
               }
             }
           }
@@ -6509,7 +6688,7 @@ ik_ui_inspector(void)
         ////////////////////////////////
         //~ Group
 
-        if(b->group_children_count > 0)
+        if(b->children_count > 0)
         {
           UI_WidthFill
           ui_divider(ui_em(0.5, 0.0));
@@ -6530,7 +6709,7 @@ ik_ui_inspector(void)
               // left
               if(ui_clicked(ik_ui_buttonf("<")))
               {
-                for(IK_Box *child = b->group_first; child != 0; child = child->group_next)
+                for(IK_Box *child = b->first; child != 0; child = child->next)
                 {
                   child->position.x = b->position.x;
                 }
@@ -6543,7 +6722,7 @@ ik_ui_inspector(void)
               // top
               if(ui_clicked(ik_ui_buttonf("^")))
               {
-                for(IK_Box *child = b->group_first; child != 0; child = child->group_next)
+                for(IK_Box *child = b->first; child != 0; child = child->next)
                 {
                   child->position.y = b->position.y;
                 }
@@ -6557,7 +6736,7 @@ ik_ui_inspector(void)
               // down
               if(ui_clicked(ik_ui_buttonf("v")))
               {
-                for(IK_Box *child = b->group_first; child != 0; child = child->group_next)
+                for(IK_Box *child = b->first; child != 0; child = child->next)
                 {
                   child->position.y = b->position.y + b->rect_size.y - child->rect_size.y;
                 }
@@ -6570,7 +6749,7 @@ ik_ui_inspector(void)
               // right
               if(ui_clicked(ik_ui_buttonf(">")))
               {
-                for(IK_Box *child = b->group_first; child != 0; child = child->group_next)
+                for(IK_Box *child = b->first; child != 0; child = child->next)
                 {
                   child->position.x = b->position.x + b->rect_size.x - child->rect_size.x;
                 }
@@ -6596,13 +6775,13 @@ ik_ui_inspector(void)
               if(ui_clicked(ik_ui_buttonf(",")))
               {
                 F32 max_height = 0;
-                for(IK_Box *child = b->group_first; child != 0; child = child->group_next)
+                for(IK_Box *child = b->first; child != 0; child = child->next)
                 {
                   max_height = Max(max_height, child->rect_size.y);
                   ik_box_do_translate(child, v2f32(0, b->position.y-child->position.y));
                 }
 
-                for(IK_Box *child = b->group_first; child != 0; child = child->group_next)
+                for(IK_Box *child = b->first; child != 0; child = child->next)
                 {
                   F32 scale = max_height/child->rect_size.y;
                   ik_box_do_scale(child, v2f32(scale,scale), b->position);
@@ -6617,13 +6796,13 @@ ik_ui_inspector(void)
               if(ui_clicked(ik_ui_buttonf("-")))
               {
                 F32 max_width = 0;
-                for(IK_Box *child = b->group_first; child != 0; child = child->group_next)
+                for(IK_Box *child = b->first; child != 0; child = child->next)
                 {
                   max_width = Max(max_width, child->rect_size.x);
                   ik_box_do_translate(child, v2f32(b->position.x-child->position.x, 0));
                 }
 
-                for(IK_Box *child = b->group_first; child != 0; child = child->group_next)
+                for(IK_Box *child = b->first; child != 0; child = child->next)
                 {
                   F32 scale = max_width/child->rect_size.x;
                   ik_box_do_scale(child, v2f32(scale,scale), b->position);
@@ -6650,7 +6829,7 @@ ik_ui_inspector(void)
               if(ui_clicked(ik_ui_buttonf(",")))
               {
                 F32 advance_y = 0;
-                for(IK_Box *child = b->group_first; child != 0; child = child->group_next)
+                for(IK_Box *child = b->first; child != 0; child = child->next)
                 {
                   F32 y = b->position.y+advance_y;
                   ik_box_do_translate(child, v2f32(0, y-child->position.y));
@@ -6666,7 +6845,7 @@ ik_ui_inspector(void)
               if(ui_clicked(ik_ui_buttonf("-")))
               {
                 F32 advance_x = 0;
-                for(IK_Box *child = b->group_first; child != 0; child = child->group_next)
+                for(IK_Box *child = b->first; child != 0; child = child->next)
                 {
                   F32 x = b->position.x+advance_x;
                   ik_box_do_translate(child, v2f32(x-child->position.x, 0));
@@ -6711,14 +6890,14 @@ ik_ui_inspector(void)
               IK_Box *select = frame->select;
               if(b == select)
               {
-                for(IK_Box *child = select->group_first, *next = 0; child != 0; child = next)
+                for(IK_Box *child = select->first, *next = 0; child != 0; child = next)
                 {
-                  next = child->group_next;
-                  ik_box_release(child);
+                  next = child->next;
+                  ik_box_captured_release(child);
                 }
                 select->flags |= IK_BoxFlag_Disabled;
               }
-              else ik_box_release(b);
+              else ik_box_captured_release(b);
             }
           }
         }
@@ -6847,7 +7026,7 @@ ik_ui_box_ctx_menu(void)
         }
         if(ui_clicked(ui_buttonf("delete")))
         {
-          ik_box_release(box);
+          ik_box_captured_release(box);
           taken = 1;
         }
         if(box->flags&IK_BoxFlag_DrawImage && ui_clicked(ui_buttonf("export as png")))
@@ -7000,6 +7179,8 @@ internal void
 ik_ui_cmd_palette()
 {
   F32 vertical_padding = ui_top_font_size()*4;
+  F32 height = ui_top_font_size()*60;
+  height = ClampTop(ik_state->window_dim.y-vertical_padding*2, height);
   F32 width = ui_top_font_size()*60;
   UI_Box *container;
   UI_FixedX(ik_state->window_dim.x/2.0-width/2.0)
@@ -7011,14 +7192,20 @@ ik_ui_cmd_palette()
     UI_Transparency(0.05)
     container = ui_build_box_from_stringf(0, "###command_palette");
 
+  F32 search_bar_height_px = ui_top_px_height();
   // search bar
+  UI_Parent(container)
+    UI_PrefHeight(ui_px(search_bar_height_px, 1.0))
   {
-    // TODO
+    UI_Box *search_bar_container_box;
+    UI_Flags(UI_BoxFlag_DrawBorder|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawDropShadow)
+      UI_WidthFill
+      search_bar_container_box = ui_build_box_from_key(0, ui_key_zero());
   }
 
   // item list
   UI_ScrollAreaParams scroll_params = {0};
-  scroll_params.dim_px = v2f32(width, ui_top_font_size()*60);
+  scroll_params.dim_px = v2f32(width, height-search_bar_height_px);
   ui_push_parent(container);
   ui_scroll_area_begin(str8_lit(""), &scroll_params);
   UI_WidthFill
@@ -7792,9 +7979,9 @@ ik_frame_to_tyml(IK_Frame *frame)
 
     SE_Array_WithTag(str8_lit("boxes"))
     {
-      for(IK_Box *box = frame->box_list.first; box != 0; box = box->next)
+      for(IK_Box *box = frame->box_list.first; box != 0; box = box->list_next)
       {
-        IK_Box *group = box->group;
+        IK_Box *group = box->parent;
 
         SE_Struct()
         {
@@ -7991,8 +8178,8 @@ ik_frame_from_tyml(String8 path)
 
       if(group)
       {
-        DLLPushFront_NP(group->group_first, group->group_last, box, group_next, group_prev);
-        group->group_children_count++;
+        DLLPushFront(group->first, group->last, box);
+        group->children_count++;
       }
 
       String8 name = se_str_from_tag(n, str8_lit("name"));

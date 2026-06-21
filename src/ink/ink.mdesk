@@ -6,8 +6,8 @@ IK_StackTable:
   //- k: frame
   { Frame                              frame                        `IK_Frame *`           `0`                                }
 
-  //- k: group
-  { GroupParent                        group_parent                 `IK_Box *`             `0`                                }
+  //- k: grouping
+  { Parent                             parent                       `IK_Box *`             `0`                                }
 
 
   //- k: font

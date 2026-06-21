@@ -38,8 +38,7 @@ typedef enum IK_DragDropState
   IK_DragDropState_Dragging,
   IK_DragDropState_Dropping,
   IK_DragDropState_COUNT
-}
-IK_DragDropState;
+} IK_DragDropState;
 
 ////////////////////////////////
 //~ Text
@@ -428,6 +427,7 @@ typedef U64 IK_BoxFlags;
 # define IK_BoxFlag_DoubleClickToUnFocus  (IK_BoxFlags)(1ull<<35)
 # define IK_BoxFlag_Transparent           (IK_BoxFlags)(1ull<<36) // fallthrough operations (translate, scale, deletion, selection, paste)
 # define IK_BoxFlag_DrawTag               (IK_BoxFlags)(1ull<<37) // FIXME: oginize the order later
+# define IK_BoxFlag_Deleted               (IK_BoxFlags)(1ull<<38) // FIXME: oginize the order later
 
 // compound flags
 #define IK_BoxFlag_Dragable (IK_BoxFlag_DragToScaleFontSize|IK_BoxFlag_DragToScalePoint|IK_BoxFlag_DragToScaleRectSize|IK_BoxFlag_DragToPosition|IK_BoxFlag_DragToScaleStrokeSize|IK_BoxFlag_DragToScaleStrokeSize)
@@ -457,20 +457,27 @@ struct IK_Box
   IK_Box *hash_prev;
 
   // list links
-  IK_Box *next;
-  IK_Box *prev;
+  IK_Box *list_next;
+  IK_Box *list_prev;
+
+  // free links
+  IK_Box *free_next;
 
   // Group links
-  IK_Box *group;
-  IK_Box *group_first;
-  IK_Box *group_last;
-  IK_Box *group_next;
-  IK_Box *group_prev;
-  U64 group_children_count;
+  IK_Box *parent;
+  IK_Box *first;
+  IK_Box *last;
+  IK_Box *next;
+  IK_Box *prev;
+  U64 children_count;
 
   // Selection link
   IK_Box *select_next;
   IK_Box *select_prev;
+
+  // Capture link
+  IK_Box *capture_next;
+  IK_Box *capture_source;
 
   // Per-build equipment
   String8 name;
@@ -545,41 +552,28 @@ struct IK_BoxList
 ////////////////////////////////
 //- Action
 
-typedef enum IK_ActionKind
+// FIXME: rename these 
+typedef enum IK_BoxActionKind
 {
-  IK_ActionKind_Create,
-  IK_ActionKind_Delete,
-  // IK_ActionKind_Edit,
-  IK_ActionKind_COUNT,
-} IK_ActionKind;
+  IK_BoxActionKind_Edit,
+  IK_BoxActionKind_Delete,
+  IK_BoxActionKind_COUNT,
+} IK_BoxActionKind;
 
-typedef struct IK_Action IK_Action;
-struct IK_Action
+typedef struct IK_BoxAction IK_BoxAction;
+struct IK_BoxAction
 {
-  IK_ActionKind kind;
-  union
-  {
-    struct
-    {
-      IK_Box *first;
-    } create;
-
-    struct
-    {
-      IK_Box *first;
-    } delete;
-  } v;
+  IK_Box *first_captured;
 };
 
-typedef struct IK_ActionRing IK_ActionRing;
-struct IK_ActionRing
+typedef struct IK_BoxActionRing IK_BoxActionRing;
+struct IK_BoxActionRing
 {
   U64 head; // next write pos
   U64 mark; // last write pos
   U64 tail; // oldest write pos
-  IK_Action *slots;
+  IK_BoxAction *slots;
   U64 slot_count;
-  U64 write_count; // diff between head and tail
 };
 
 ////////////////////////////////
@@ -615,8 +609,8 @@ struct IK_Frame
   // image cache
   IK_ImageCacheSlot image_cache_table[1024];
 
-  // action ring buffer
-  IK_ActionRing action_ring;
+  // box action ring buffer
+  IK_BoxActionRing box_action_ring;
 
   // free stack
   IK_Box *first_free_box;
@@ -1007,6 +1001,7 @@ internal IK_Cfg ik_cfg_default();
 //~ Box Tree Building API
 
 //- box node construction
+internal IK_Box* ik_box_alloc();
 internal IK_Box* ik_build_box_from_key_(UI_BoxFlags flags, IK_Key key, B32 pre_order);
 #define ik_build_box_from_key(f,k) ik_build_box_from_key_((f), (k), 1)
 internal IK_Key  ik_active_seed_key(void);
@@ -1015,7 +1010,8 @@ internal IK_Box* ik_build_box_from_stringf(IK_BoxFlags flags, char *fmt, ...);
 internal IK_Box* ik_box_clone(IK_Box *src);
 
 //- box node destruction
-internal void ik_box_release(IK_Box *box);
+internal void ik_box_release(IK_Box *box, B32 recursive);
+internal void ik_box_captured_release(IK_Box *box);
 
 //- box node equipment
 internal void    ik_box_equip_name(IK_Box *box, String8 name);
@@ -1039,13 +1035,11 @@ internal void ik_box_do_translate(IK_Box *box, Vec2F32 translate);
 //~ Action Type Functions
 
 //- ring buffer operations
-internal IK_Action *ik_action_ring_write();
-internal IK_Action *ik_action_ring_backward();
-internal IK_Action *ik_action_ring_forward();
-
-//- action undo/redo
-internal void ik_action_undo(IK_Action *action);
-internal void ik_action_redo(IK_Action *action);
+internal IK_BoxAction* ik_box_action_ring_push();
+internal IK_BoxAction* ik_box_action_ring_backward();
+internal IK_BoxAction* ik_box_action_ring_forward();
+internal IK_BoxAction* ik_box_action_capture(IK_Box *box);
+internal void ik_box_action_slot_reset(IK_BoxAction *slot);
 
 //- state undo/redo
 internal B32 ik_undo();
