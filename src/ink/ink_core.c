@@ -1353,7 +1353,7 @@ ik_frame(void)
           camera->target_zoom_factor = target_zoom_factor;
         }
 
-        camera->anim_rate = ik_state->animation.fast_rate;
+        camera->anim_rate = ik_state->animation.fish_rate;
         taken = 1;
       }
 
@@ -3313,8 +3313,8 @@ ik_frame_alloc()
   frame->camera.zn = -0.1;
   frame->camera.zf = 1000000.0;
   frame->camera.anim_rate = ik_state->animation.fast_rate;
-  frame->camera.min_zoom_step = 1.01;
-  frame->camera.max_zoom_step = 1.35;
+  frame->camera.min_zoom_step = 1.10;
+  frame->camera.max_zoom_step = 1.65;
 
   // create blank box
   ik_push_frame(frame);
