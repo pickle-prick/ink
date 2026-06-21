@@ -1331,17 +1331,21 @@ ik_frame(void)
 
         target_zoom_factor = Clamp(min_zoom_factor, target_zoom_factor, max_zoom_factor);
 
-        // Where the mouse is in the world AFTER this zoom, based on the new target zoom
-        Rng2F32 target_rect_after = ik_rect_from_camera_pos_zoom(camera->position, target_zoom_factor);
-        Mat4x4F32 proj_mat_after = make_orthographic_vulkan_4x4f32(target_rect_after.x0, target_rect_after.x1, target_rect_after.y1, target_rect_after.y0, camera->zn, camera->zf);
-        Mat4x4F32 proj_mat_inv_after = inverse_orthographic_4x4f32(proj_mat_after);
-        Vec2F32 mouse_in_world_after = ik_mouse_in_world(proj_mat_inv_after);
+        if(target_zoom_factor != camera->target_zoom_factor)
+        {
+          // Where the mouse is in the world AFTER this zoom, based on the new target zoom
+          Rng2F32 target_rect_after = ik_rect_from_camera_pos_zoom(camera->position, target_zoom_factor);
+          Mat4x4F32 proj_mat_after = make_orthographic_vulkan_4x4f32(target_rect_after.x0, target_rect_after.x1, target_rect_after.y1, target_rect_after.y0, camera->zn, camera->zf);
+          Mat4x4F32 proj_mat_inv_after = inverse_orthographic_4x4f32(proj_mat_after);
+          Vec2F32 mouse_in_world_after = ik_mouse_in_world(proj_mat_inv_after);
 
-        Vec2F32 world_delta = sub_2f32(ik_state->mouse_in_world, mouse_in_world_after);
-        Assert(isfinite(world_delta.x) && isfinite(world_delta.y));
+          Vec2F32 world_delta = sub_2f32(ik_state->mouse_in_world, mouse_in_world_after);
+          Assert(isfinite(world_delta.x) && isfinite(world_delta.y));
 
-        camera->target_position = add_2f32(camera->position, world_delta);
-        camera->target_zoom_factor = target_zoom_factor;
+          camera->target_position = add_2f32(camera->position, world_delta);
+          camera->target_zoom_factor = target_zoom_factor;
+        }
+
         camera->anim_rate = ik_state->animation.fast_rate;
         taken = 1;
       }
@@ -1360,7 +1364,6 @@ ik_frame(void)
       Vec2F32 delta = sub_2f32(drag.drag_start_mouse, ik_state->mouse);
       delta.x *= ik_state->screen_to_world_factor;
       delta.y *= ik_state->screen_to_world_factor;
-
       Vec2F32 next_pos = add_2f32(drag.drag_start_pos, delta);
       next_pos.x = Clamp(-max_pan_offset, next_pos.x, max_pan_offset);
       next_pos.y = Clamp(-max_pan_offset, next_pos.y, max_pan_offset);
@@ -1379,10 +1382,10 @@ ik_frame(void)
     camera->zoom_factor = 1.0f / s;
 
 
-    F32 ep = (ik_state->dpi/96.f)*1.1*ik_state->screen_to_world_factor;
+    F32 ep = 0.01*ik_state->screen_to_world_factor;
     if(abs_f32(camera->target_position.x-camera->position.x) < ep) camera->position.x = camera->target_position.x;
     if(abs_f32(camera->target_position.y-camera->position.y) < ep) camera->position.y = camera->target_position.y;
-    if(abs_f32(camera->target_zoom_factor-camera->zoom_factor) < 0.001) camera->zoom_factor = camera->target_zoom_factor;
+    if(abs_f32(camera->target_zoom_factor-camera->zoom_factor) < 0.0001) camera->zoom_factor = camera->target_zoom_factor;
 
     camera->zoom_t += ik_state->animation.slow_rate * ((F32)is_zooming-camera->zoom_t);
     if(abs_f32(camera->zoom_t-(F32)is_zooming) < 0.02) camera->zoom_t = (F32)is_zooming;
@@ -1607,9 +1610,11 @@ ik_frame(void)
 
         if(box->flags&IK_BoxFlag_DoubleClickToCenter && box->sig.f&IK_SignalFlag_DoubleClicked)
         {
-          // ik_kill_action();
-          // frame->camera.target_center = center_2f32(rect);
-          // frame->camera.anim_rate = ik_state->animation.slug_rate;
+          Vec2F32 box_center = center_2f32(rect);
+          Vec2F32 viewport_half_size = scale_2f32(ik_state->window_dim, 0.5f*ik_state->screen_to_world_factor);
+          frame->camera.target_position = sub_2f32(box_center, viewport_half_size);
+          frame->camera.anim_rate = ik_state->animation.slug_rate;
+          ik_kill_action();
         }
 
         ////////////////////////////////
@@ -3287,8 +3292,8 @@ ik_frame_alloc()
   frame->camera.zn = -0.1;
   frame->camera.zf = 1000000.0;
   frame->camera.anim_rate = ik_state->animation.fast_rate;
-  frame->camera.min_zoom_step = 1.05;
-  frame->camera.max_zoom_step = 1.65;
+  frame->camera.min_zoom_step = 1.01;
+  frame->camera.max_zoom_step = 1.35;
 
   // create blank box
   ik_push_frame(frame);
@@ -5694,6 +5699,21 @@ ik_ui_stats(void)
       ui_labelf("ik_drag_start_mouse");
       ui_spacer(ui_pct(1.0, 0.0));
       ui_labelf("%.0f %.0f", ik_state->drag_start_mouse.x, ik_state->drag_start_mouse.y);
+    }
+    ui_divider(ui_em(0.1, 0.0));
+    UI_Row
+      UI_PrefWidth(ui_text_dim(1, 1.0))
+    {
+      ui_labelf("camera_position");
+      ui_spacer(ui_pct(1.0, 0.0));
+      ui_labelf("%.2f %.2f", camera->position.x, camera->position.y);
+    }
+    UI_Row
+      UI_PrefWidth(ui_text_dim(1, 1.0))
+    {
+      ui_labelf("camera_zoom");
+      ui_spacer(ui_pct(1.0, 0.0));
+      ui_labelf("%.2f", camera->zoom_factor);
     }
     UI_Row
       UI_PrefWidth(ui_text_dim(1, 1.0))
@@ -8544,7 +8564,7 @@ ik_frame_to_tyml(IK_Frame *frame)
     SE_Struct_WithTag(str8_lit("camera"))
     {
       IK_Camera *camera = &frame->camera;
-      se_v2f32_with_tag(str8_lit("pos"), camera->position);
+      se_v2f32_with_tag(str8_lit("position"), camera->position);
       se_f32_with_tag(str8_lit("zoom_factor"), camera->zoom_factor);
     }
 
@@ -8711,16 +8731,10 @@ ik_frame_from_tyml(String8 path)
   SE_Node *camera_node = se_struct_from_tag(se_node, str8_lit("camera"));
   if(camera_node)
   {
-    // Vec2F32 center = se_v2f32_from_tag(camera_node, str8_lit("center"));
-    // F32 height = se_f32_from_tag(camera_node, str8_lit("height"));
-    // frame->camera.target_center = center;
-    // frame->camera.target_height = height;
-    // Vec4F32 src = se_v4f32_from_tag(camera_node, str8_lit("rect"));
-    // Rng2F32 rect = {src.x, src.y, src.z, src.w};
-    // Vec2F32 dim = dim_2f32(rect);
-    // dim.x = dim.y * (ik_state->window_dim.x/ik_state->window_dim.y);
-    // rect.x1 = rect.x0 + dim.x;
-    // frame->camera.target_rect = rect;
+    Vec2F32 position = se_v2f32_from_tag(camera_node, str8_lit("position"));
+    F32 zoom_factor = se_f32_from_tag(camera_node, str8_lit("zoom_factor"));
+    frame->camera.target_position = position;
+    frame->camera.target_zoom_factor = zoom_factor;
   }
 
   /////////////////////////////////
