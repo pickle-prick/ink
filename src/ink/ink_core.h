@@ -215,6 +215,17 @@ struct IK_ImageCacheSlot
 };
 
 ////////////////////////////////
+//~ Schema Table
+
+typedef struct IK_SchemaTable IK_SchemaTable;
+struct IK_SchemaTable
+{
+  Vec4F32 background_color;
+  // F32 font_size;
+  B32 changed_without_saved;
+};
+
+////////////////////////////////
 //~ Image Decode Job Queue
 
 typedef struct IK_ImageDecodeQueue IK_ImageDecodeQueue;
@@ -713,6 +724,8 @@ struct IK_State
   R_Handle              r_wnd;
   OS_Handle             os_wnd;
   UI_EventList          *events;
+
+  IK_SchemaTable        schema_table;
 
   // debug
   B32                   show_stats;

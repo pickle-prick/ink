@@ -573,6 +573,7 @@ ik_init(OS_Handle os_wnd, R_Handle r_wnd)
   ik_state = push_array(arena, IK_State, 1);
   {
     ik_state->arena = arena;
+    ik_state->schema_table.background_color = rgba_from_u32(0x660B05FF);
     ik_state->os_wnd = os_wnd;
     ik_state->r_wnd = r_wnd;
     ik_state->dpi = os_dpi_from_window(os_wnd);
@@ -1192,7 +1193,7 @@ ik_frame(void)
   //~ Build Debug UI
 
   // FIXME: potential performance issues
-  // ik_ui_cmd_palette();
+  ik_ui_cmd_palette();
   ik_ui_man_page();
   ik_ui_toolbar();
   ik_ui_bottom_bar();
@@ -2171,11 +2172,8 @@ ik_frame(void)
     // draw a background
     {
       Rng2F32 rect = {0,0, ik_state->window_dim.x, ik_state->window_dim.y};
-      // Vec4F32 clr = rgba_from_u32(0xFF0F0E0E);
-      U32 src = 0x660B05FF;
-      // U32 src = 0x8C1007FF;
-      Vec4F32 clr = linear_from_srgba(rgba_from_u32(src));
-      dr_rect_keyed(rect, clr, 0,0,0, frame->blank->key_3f32);
+      Vec4F32 color = linear_from_srgba(ik_state->schema_table.background_color);
+      dr_rect_keyed(rect, color, 0,0,0, frame->blank->key_3f32);
     }
 
     /////////////////////////////////
@@ -7461,7 +7459,8 @@ ik_ui_cmd_palette()
     UI_FixedY(vertical_padding)
     UI_FixedWidth(width)
     UI_PrefHeight(ui_children_sum(1.0))
-    UI_Flags(UI_BoxFlag_DrawBorder)
+    UI_Focus(UI_FocusKind_On)
+    UI_Flags(UI_BoxFlag_DrawBorder|UI_BoxFlag_DefaultFocusNav)
     UI_ChildLayoutAxis(Axis2_Y)
     UI_Transparency(0.05)
     container = ui_build_box_from_stringf(0, "###command_palette");
@@ -7484,12 +7483,12 @@ ik_ui_cmd_palette()
   ui_scroll_area_begin(str8_lit(""), &scroll_params);
   UI_WidthFill
   {
-    for(U64 i = 0; i < 90; i++)
+    UI_Row
     {
-      UI_Row
-      {
-        ui_labelf("label_%I64u", i);
-      }
+      ui_label(str8_lit("background"));
+      ui_spacer(ui_pct(1.0, 0.0));
+      UI_PrefWidth(ui_em(3.0, 1.0))
+        ik_ui_hsva_picker(str8_lit("background color"), &ik_state->schema_table.background_color);
     }
   }
   ui_scroll_area_end();
@@ -7553,159 +7552,166 @@ ik_ui_hsva_picker(String8 string, Vec4F32 *rgba)
     ui_set_auto_focus_active_key(ui_key_zero());
   }
 
-  if(sig.box->focus_active_t > 0.001)
+  if(sig.box->focus_active_t > 0.01)
   {
-    UI_Box *floating_container;
-    UI_Parent(sig.box)
-      UI_Flags(UI_BoxFlag_Floating|UI_BoxFlag_DrawBorder|UI_BoxFlag_DrawBackground)
-      UI_PrefWidth(ui_em(20,1.0))
-      UI_PrefHeight(ui_children_sum(1.0))
-      // UI_PrefHeight(ui_children_sum(1.0))
-      UI_Squish(mix_1f32(1.0, 0, sig.box->focus_active_t))
-      // UI_FixedPos(mix_2f32(v2f32(0, sig.box->fixed_size.y/2.0), v2f32(sig.box->fixed_size.x+ui_top_font_size()*2, sig.box->fixed_size.y/2.0), sig.box->hot_t))
-      UI_FixedPos(v2f32(sig.box->fixed_size.x+ui_top_font_size()*2, sig.box->fixed_size.y/2.0))
-      UI_Flags(UI_BoxFlag_DrawBorder|UI_BoxFlag_DrawDropShadow|UI_BoxFlag_DrawBackground)
-      UI_ChildLayoutAxis(Axis2_Y)
-      floating_container = ui_build_box_from_stringf(0, "expanded_picker");
-
     // FIXME: visiual jitter
     // FIXME: we would like to store this variable the first time it is opened
     // B32 mouse_in_bottom_half = ik_state->mouse.y > ik_state->window_dim.y/2.f;
     // if(mouse_in_bottom_half) floating_container->fixed_position.y -= floating_container->fixed_size.y;
 
-    UI_Parent(floating_container)
-      UI_Focus(UI_FocusKind_Null)
+    UI_Key key = ui_key_from_stringf(ui_active_seed_key(), "hsvc_color_picker");
+    UI_CtxMenu(key)
     {
-      UI_WidthFill
-      UI_PrefHeight(ui_em(15, 1.0))
-      UI_Flags(UI_BoxFlag_DrawDropShadow)
-      UI_Row
-      UI_Flags(0)
-      UI_PrefHeight(ui_pct(1.0,0.0))
-      {
-        UI_Signal sv_sig = {0};
-        UI_Signal h_sig = {0};
-        UI_Signal a_sig = {0};
-        UI_PrefWidth(ui_pct(0.8, 0.0))
-        {
-          sv_sig = ui_sat_val_pickerf(hsva.x, &hsva.y, &hsva.z, "sta_val_picker");
-        }
-        ui_spacer(ui_em(0.5f, 1.f));
-        UI_PrefWidth(ui_pct(0.1, 0.0))
-        UI_Flags(UI_BoxFlag_DrawBorder)
-        {
-          h_sig = ui_hue_pickerf(&hsva.x, hsva.y, hsva.z, "hue_picker");
-        }
-        ui_spacer(ui_em(0.5f, 1.f));
-        UI_PrefWidth(ui_pct(0.1, 0.0))
-        UI_Flags(UI_BoxFlag_DrawBorder)
-        {
-          a_sig = ui_alpha_pickerf(&hsva.w, "alpha_picker");
-        }
-      }
+      UI_Box *container;
+      UI_PrefWidth(ui_em(20,1.0))
+        UI_PrefHeight(ui_children_sum(1.0))
+        // UI_Squish(mix_1f32(1.0, 0, sig.box->focus_active_t))
+        UI_Flags(UI_BoxFlag_DrawBorder|UI_BoxFlag_DrawDropShadow|UI_BoxFlag_DrawBackground)
+        UI_ChildLayoutAxis(Axis2_Y)
+        container = ui_build_box_from_stringf(0, "container");
 
-      // UI_PrefWidth(ui_em(30,1.0))
-      UI_WidthFill
-      ui_divider(ui_em(1.0,1.0));
-
-      // rgba
-      UI_WidthFill
-      UI_Flags(UI_BoxFlag_DrawSideBottom|UI_BoxFlag_DrawDropShadow)
-      UI_Row
+      UI_Parent(container)
       {
-        UI_PrefWidth(ui_pct(1.0, 0.0))
-        UI_Flags(UI_BoxFlag_DrawBorder)
+        UI_WidthFill
+        UI_PrefHeight(ui_em(15, 1.0))
+        UI_Flags(UI_BoxFlag_DrawDropShadow)
         UI_Row
         UI_Flags(0)
+        UI_PrefHeight(ui_pct(1.0,0.0))
         {
-          char *labels[4] = {"R", "G", "B", "A"};
-          for(U64 i = 0; i < 4; i ++)
+          UI_Signal sv_sig = {0};
+          UI_Signal h_sig = {0};
+          UI_Signal a_sig = {0};
+          UI_PrefWidth(ui_pct(0.8, 0.0))
           {
-            U8 value_u8 = (U8)(rgba->v[i]*255);
-            String8 value_string = push_str8f(ui_build_arena(), "%u", value_u8);
-            UI_PrefWidth(ui_text_dim(0.0, 1.0))
-              ui_labelf("%s: ", labels[i]);
-            if(ui_committed(ui_line_edit(&ik_state->edit_buffer.cursor,
-                                         &ik_state->edit_buffer.mark,
-                                         ik_state->edit_buffer.buffer,
-                                         ArrayCount(ik_state->edit_buffer.buffer),
-                                         &ik_state->edit_buffer.string_size,
-                                         value_string,
-                                         push_str8f(ui_build_arena(), "RGBA_%s", labels[i]))))
+            sv_sig = ui_sat_val_pickerf(hsva.x, &hsva.y, &hsva.z, "sta_val_picker");
+          }
+          ui_spacer(ui_em(0.5f, 1.f));
+          UI_PrefWidth(ui_pct(0.1, 0.0))
+          UI_Flags(UI_BoxFlag_DrawBorder)
+          {
+            h_sig = ui_hue_pickerf(&hsva.x, hsva.y, hsva.z, "hue_picker");
+          }
+          ui_spacer(ui_em(0.5f, 1.f));
+          UI_PrefWidth(ui_pct(0.1, 0.0))
+          UI_Flags(UI_BoxFlag_DrawBorder)
+          {
+            a_sig = ui_alpha_pickerf(&hsva.w, "alpha_picker");
+          }
+        }
+
+        UI_WidthFill
+        ui_divider(ui_em(1.0,1.0));
+
+        // rgba
+        UI_WidthFill
+        UI_Flags(UI_BoxFlag_DrawSideBottom|UI_BoxFlag_DrawDropShadow)
+        UI_Row
+        {
+          UI_PrefWidth(ui_pct(1.0, 0.0))
+          UI_Flags(UI_BoxFlag_DrawBorder)
+          UI_Row
+          UI_Flags(0)
+          {
+            char *labels[4] = {"R", "G", "B", "A"};
+            for(U64 i = 0; i < 4; i ++)
             {
-              String8 edit_string = str8(ik_state->edit_buffer.buffer, ik_state->edit_buffer.string_size);
-              if(edit_string.size > 0)
+              U8 value_u8 = (U8)(rgba->v[i]*255);
+              String8 value_string = push_str8f(ui_build_arena(), "%u", value_u8);
+              UI_PrefWidth(ui_text_dim(0.0, 1.0))
+                ui_labelf("%s: ", labels[i]);
+              if(ui_committed(ui_line_edit(&ik_state->edit_buffer.cursor,
+                                           &ik_state->edit_buffer.mark,
+                                           ik_state->edit_buffer.buffer,
+                                           ArrayCount(ik_state->edit_buffer.buffer),
+                                           &ik_state->edit_buffer.string_size,
+                                           value_string,
+                                           push_str8f(ui_build_arena(), "RGBA_%s", labels[i]))))
               {
-                U8 new_value = u64_from_str8(edit_string, 10);
-                if(new_value < 255)
+                String8 edit_string = str8(ik_state->edit_buffer.buffer, ik_state->edit_buffer.string_size);
+                if(edit_string.size > 0)
                 {
-                  Vec4F32 new_rgba = *rgba;
-                  new_rgba.v[i] = (F32)new_value/255.f;
-                  hsva = hsva_from_rgba(new_rgba);
+                  U8 new_value = u64_from_str8(edit_string, 10);
+                  if(new_value < 255)
+                  {
+                    Vec4F32 new_rgba = *rgba;
+                    new_rgba.v[i] = (F32)new_value/255.f;
+                    hsva = hsva_from_rgba(new_rgba);
+                  }
                 }
               }
             }
           }
         }
-      }
 
-      // hsva
-      UI_WidthFill
-      UI_Flags(UI_BoxFlag_DrawSideBottom|UI_BoxFlag_DrawDropShadow)
-      UI_Row
-      {
-        UI_PrefWidth(ui_pct(1.0, 0.0))
-        UI_Flags(UI_BoxFlag_DrawBorder)
+        // hsva
+        UI_WidthFill
+        UI_Flags(UI_BoxFlag_DrawSideBottom|UI_BoxFlag_DrawDropShadow)
         UI_Row
-        UI_Flags(0)
         {
-          char *labels[4] = {"H", "S", "V", "A"};
-          for(U64 i = 0; i < 4; i ++)
+          UI_PrefWidth(ui_pct(1.0, 0.0))
+          UI_Flags(UI_BoxFlag_DrawBorder)
+          UI_Row
+          UI_Flags(0)
           {
-            F32 value_f32 = hsva.v[i];
-            String8 value_string = push_str8f(ui_build_arena(), "%.2f", value_f32);
-            UI_PrefWidth(ui_text_dim(0.0, 1.0))
-              ui_labelf("%s: ", labels[i]);
-            if(ui_committed(ui_line_edit(&ik_state->edit_buffer.cursor,
-                                         &ik_state->edit_buffer.mark,
-                                         ik_state->edit_buffer.buffer,
-                                         ArrayCount(ik_state->edit_buffer.buffer),
-                                         &ik_state->edit_buffer.string_size,
-                                         value_string,
-                                         push_str8f(ui_build_arena(), "HSVA_%s", labels[i]))))
+            char *labels[4] = {"H", "S", "V", "A"};
+            for(U64 i = 0; i < 4; i ++)
             {
-              String8 edit_string = str8(ik_state->edit_buffer.buffer, ik_state->edit_buffer.string_size);
-              if(edit_string.size > 0)
+              F32 value_f32 = hsva.v[i];
+              String8 value_string = push_str8f(ui_build_arena(), "%.2f", value_f32);
+              UI_PrefWidth(ui_text_dim(0.0, 1.0))
+                ui_labelf("%s: ", labels[i]);
+              if(ui_committed(ui_line_edit(&ik_state->edit_buffer.cursor,
+                                           &ik_state->edit_buffer.mark,
+                                           ik_state->edit_buffer.buffer,
+                                           ArrayCount(ik_state->edit_buffer.buffer),
+                                           &ik_state->edit_buffer.string_size,
+                                           value_string,
+                                           push_str8f(ui_build_arena(), "HSVA_%s", labels[i]))))
               {
-                F64 new_value = f64_from_str8(edit_string);
-                if(new_value < 1.0) hsva.v[i] = (F32)new_value;
+                String8 edit_string = str8(ik_state->edit_buffer.buffer, ik_state->edit_buffer.string_size);
+                if(edit_string.size > 0)
+                {
+                  F64 new_value = f64_from_str8(edit_string);
+                  if(new_value < 1.0) hsva.v[i] = (F32)new_value;
+                }
               }
             }
           }
         }
-      }
 
-      // hex string
-      UI_WidthFill
-        UI_Font(ik_font_from_slot(IK_FontSlot_Code))
-      {
-        String8 string = hex_string_from_rgba_4f32(ui_build_arena(), *rgba);
-        if(ui_committed(ui_line_edit(&ik_state->edit_buffer.cursor,
-                                     &ik_state->edit_buffer.mark,
-                                     ik_state->edit_buffer.buffer,
-                                     ArrayCount(ik_state->edit_buffer.buffer),
-                                     &ik_state->edit_buffer.string_size,
-                                     string,
-                                     str8_lit("hex_string"))))
+        // hex string
+        UI_WidthFill
+          UI_Font(ik_font_from_slot(IK_FontSlot_Code))
         {
-          String8 edit_string = str8(ik_state->edit_buffer.buffer, ik_state->edit_buffer.string_size);
-          if(edit_string.size > 0)
+          String8 string = hex_string_from_rgba_4f32(ui_build_arena(), *rgba);
+          if(ui_committed(ui_line_edit(&ik_state->edit_buffer.cursor,
+                                       &ik_state->edit_buffer.mark,
+                                       ik_state->edit_buffer.buffer,
+                                       ArrayCount(ik_state->edit_buffer.buffer),
+                                       &ik_state->edit_buffer.string_size,
+                                       string,
+                                       str8_lit("hex_string"))))
           {
-            Vec4F32 new_rgba = rgba_from_hex_string_4f32(edit_string);
-            hsva = hsva_from_rgba(new_rgba);
+            String8 edit_string = str8(ik_state->edit_buffer.buffer, ik_state->edit_buffer.string_size);
+            if(edit_string.size > 0)
+            {
+              Vec4F32 new_rgba = rgba_from_hex_string_4f32(edit_string);
+              hsva = hsva_from_rgba(new_rgba);
+            }
           }
         }
       }
+    }
+
+    if(is_focus_active && !(ui_ctx_menu_is_open(key)))
+    {
+      ui_ctx_menu_open(key, container->key, v2f32(30,30));
+    }
+
+    if(!is_focus_active && ui_ctx_menu_is_open(key))
+    {
+      ui_ctx_menu_close();
     }
   }
 
