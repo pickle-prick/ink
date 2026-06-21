@@ -2353,7 +2353,11 @@ ik_frame(void)
 
             F32 border_thickness = mix_1f32(min_border_thickness, max_border_thickness, t);
             F32 corner_radius = 1.0 * ik_state->screen_to_world_factor.x;
-            ik_dr_rect_keyed(pad_2f32(dst, 0.5*border_thickness), box->border_color, corner_radius, border_thickness, border_thickness/2.0, box->key_3f32);
+            Vec4F32 border_color = box->border_color;
+            border_color.x*=80;
+            border_color.y*=80;
+            border_color.z*=80;
+            ik_dr_rect_keyed(pad_2f32(dst, 0.5*border_thickness), border_color, corner_radius, border_thickness, border_thickness/2.0, box->key_3f32);
           }
 
           if(box->flags & IK_BoxFlag_DrawHotEffects)
@@ -2471,6 +2475,7 @@ ik_frame(void)
       {
         dr_crt(0.25, 1.15, ik_state->time_in_seconds);
       }
+      DR_BucketScope(ik_state->bucket_ui) dr_bloom(1.0f, 0.005f);
       dr_submit_bucket(ik_state->os_wnd, ik_state->r_wnd, ik_state->bucket_ui);
     }
     Vec3F32 key_3f32 = r_window_end_frame(ik_state->os_wnd, ik_state->r_wnd, ik_state->mouse);
