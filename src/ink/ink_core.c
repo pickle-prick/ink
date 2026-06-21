@@ -1888,6 +1888,16 @@ ik_frame(void)
         }
         if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_5 && evt->modifiers == 0 && !ik_txt_editing())
         {
+          ik_state->tool = IK_ToolKind_Text;
+          eat = 1;
+        }
+        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_6 && evt->modifiers == 0 && !ik_txt_editing())
+        {
+          ik_state->tool = IK_ToolKind_Arrow;
+          eat = 1;
+        }
+        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_7 && evt->modifiers == 0 && !ik_txt_editing())
+        {
           ik_state->show_man_page = !ik_state->show_man_page;
           eat = 1;
         }
@@ -2293,7 +2303,6 @@ ik_frame(void)
       F32 border_thickness = 4.0f*ik_state->screen_to_world_factor;
       F32 edge_softness = 1.0f*ik_state->screen_to_world_factor;
       dr_rect(rect, color, 0,border_thickness,edge_softness);
-      printf("CANVAS_SIZE: %f\n", CANVAS_SIZE);
     }
 
     // NOTE(k): since we are now using pixel-perfect object picking, the drawing order matters 
