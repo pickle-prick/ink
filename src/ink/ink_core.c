@@ -2477,7 +2477,7 @@ ik_frame(void)
     r_window_begin_frame(ik_state->os_wnd, ik_state->r_wnd);
     if(!dr_bucket_is_empty(ik_state->bucket_main))
     {
-      dr_submit_bucket(ik_state->os_wnd, ik_state->r_wnd, ik_state->bucket_main);
+      dr_submit_bucket(ik_state->r_wnd, ik_state->bucket_main);
     }
     if(!dr_bucket_is_empty(ik_state->bucket_ui))
     {
@@ -2486,7 +2486,7 @@ ik_frame(void)
         dr_crt(0.25, 1.15, ik_state->time_in_seconds);
       }
       DR_BucketScope(ik_state->bucket_ui) dr_bloom(1.0f, 1.0f);
-      dr_submit_bucket(ik_state->os_wnd, ik_state->r_wnd, ik_state->bucket_ui);
+      dr_submit_bucket(ik_state->r_wnd, ik_state->bucket_ui);
     }
     Vec3F32 key_3f32 = r_window_end_frame(ik_state->os_wnd, ik_state->r_wnd, ik_state->mouse);
     ik_state->pixel_hot_key = ik_key_from_3f32(key_3f32);
