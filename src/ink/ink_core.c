@@ -1316,7 +1316,7 @@ ik_frame(void)
         F32 scale_unit = 1.f+zoom_step;
         F32 scale = pow_f32(scale_unit, (F32)delta.y);
 
-        F32 target_height = Clamp(ik_state->window_dim.y*0.1f, camera->target_height * scale, ik_state->window_dim.y*30);
+        F32 target_height = Clamp(ik_state->window_dim.y*0.01f, camera->target_height * scale, ik_state->window_dim.y*30);
         F32 target_width = target_height * (ik_state->window_ratio);
         Rng2F32 target_rect = ik_rect_from_center_size(camera->center, v2f32(target_width, target_height));
 
@@ -1380,7 +1380,7 @@ ik_frame(void)
     Vec2F32 p0 = sub_2f32(camera->center, half_size);
     Vec2F32 p1 = add_2f32(camera->center, half_size);
     camera->rect = (Rng2F32){.p0 = p0, .p1 = p1};
-    camera->rect_dim = dim_2f32(camera->rect);
+    camera->rect_dim = v2f32(width, camera->height);
 
     F32 viewport_ratio = camera->rect_dim.x/camera->rect_dim.y;
     Assert(abs_f32(viewport_ratio - ik_state->window_ratio) < 0.01f);
@@ -8508,9 +8508,9 @@ ik_frame_to_tyml(IK_Frame *frame)
     // camera
     SE_Struct_WithTag(str8_lit("camera"))
     {
-      // IK_Camera camera = frame->camera;
-      // Vec4F32 rect = v4f32(camera.target_rect.x0, camera.target_rect.y0, camera.target_rect.x1, camera.target_rect.y1);
-      // se_v4f32_with_tag(str8_lit("rect"), rect);
+      IK_Camera *camera = &frame->camera;
+      se_v2f32_with_tag(str8_lit("center"), camera->center);
+      se_f32_with_tag(str8_lit("height"), camera->height);
     }
 
     /////////////////////////////////
@@ -8676,6 +8676,10 @@ ik_frame_from_tyml(String8 path)
   SE_Node *camera_node = se_struct_from_tag(se_node, str8_lit("camera"));
   if(camera_node)
   {
+    Vec2F32 center = se_v2f32_from_tag(camera_node, str8_lit("center"));
+    F32 height = se_f32_from_tag(camera_node, str8_lit("height"));
+    frame->camera.target_center = center;
+    frame->camera.target_height = height;
     // Vec4F32 src = se_v4f32_from_tag(camera_node, str8_lit("rect"));
     // Rng2F32 rect = {src.x, src.y, src.z, src.w};
     // Vec2F32 dim = dim_2f32(rect);
