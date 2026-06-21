@@ -40,7 +40,7 @@ return old_value;
 
 #include "generated/ink.meta.c"
 
-#define M_1 48
+#define M_1 64
 
 // TODO(Next): maybe we could use metagen
 // Color palette
@@ -2177,7 +2177,7 @@ ik_frame(void)
   // override cursor
   if(!ui_state->grab_cursor && cursor_override)
   {
-    // FIXME: this will cause os push a event to the window, but why ui hover works
+    // FIXME: ui will set a default cursor regardless, if we override again here, win32 os will send a window event, thus no sleep at all
     os_set_cursor(next_cursor);
   }
 
@@ -6040,13 +6040,15 @@ struct UI_SelectionBorderDrawData
 internal UI_BOX_CUSTOM_DRAW(ui_selection_border_draw)
 {
   UI_SelectionBorderDrawData *draw_data = (UI_SelectionBorderDrawData*)user_data;
+  F32 t = draw_data->hover_t;
   F32 border_softness = 1.f;
-  R_Rect2DInst *inst = dr_rect(pad_2f32(box->rect, 1.f), box->palette->colors[UI_ColorCode_Border], 0, 2.f, border_softness*1.f);
+  F32 border_thickness = mix_1f32(2.f, 1.0f, t);
+  R_Rect2DInst *inst = dr_rect(pad_2f32(box->rect, 0.f), box->palette->colors[UI_ColorCode_Border], 0, border_thickness, border_softness);
   MemoryCopyArray(inst->corner_radii, box->corner_radii);
 
   Rng2F32 drop_shadow_rect = shift_2f32(pad_2f32(box->rect, 8), v2f32(4, 4));
   Vec4F32 drop_shadow_color = ik_rgba_from_theme_color(IK_ThemeColor_DropShadow);
-  drop_shadow_color.w = mix_1f32(drop_shadow_color.w, 0, draw_data->hover_t);
+  drop_shadow_color.w = mix_1f32(drop_shadow_color.w, 0.1f, t);
   dr_rect(drop_shadow_rect, drop_shadow_color, 0.8f, 0, 8.f);
 }
 
@@ -6077,7 +6079,7 @@ ik_ui_selection(void)
     p1.y = (p1.y*0.5+0.5) * ik_state->window_dim.y + 1;
 
     Rng2F32 rect = r2f32p(p0.x, p0.y, p1.x, p1.y);
-    rect = pad_2f32(rect, mix_1f32(8, 2, box->hot_t));
+    rect = pad_2f32(rect, mix_1f32(8.f, 1.5f, box->hot_t));
     Vec2F32 center = center_2f32(rect);
     // F32 padding_px = ui_top_font_size()*0.5;
     F32 padding_px = 0.0;
@@ -6121,8 +6123,6 @@ ik_ui_selection(void)
             UI_Flags(UI_BoxFlag_DrawSideLeft|UI_BoxFlag_DrawSideTop|UI_BoxFlag_MouseClickable|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawHotEffects|UI_BoxFlag_DrawActiveEffects)
             UI_HoverCursor(OS_Cursor_UpLeft)
             b = ui_build_box_from_stringf(0, "###top_left -> anchor");
-          b->hot_t += hot_t;
-          b->active_t += active_t;
           sig1 = ui_signal_from_box(b);
         }
 
@@ -6135,8 +6135,6 @@ ik_ui_selection(void)
             UI_Flags(UI_BoxFlag_MouseClickable|UI_BoxFlag_DrawSideTop|UI_BoxFlag_DrawSideBottom|UI_BoxFlag_DrawSideRight|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawHotEffects|UI_BoxFlag_DrawActiveEffects)
             UI_HoverCursor(OS_Cursor_UpLeft)
             b = ui_build_box_from_stringf(0, "###top_left -> right");
-          b->hot_t += hot_t;
-          b->active_t += active_t;
           sig2 = ui_signal_from_box(b);
         }
 
@@ -6149,8 +6147,6 @@ ik_ui_selection(void)
             UI_Flags(UI_BoxFlag_MouseClickable|UI_BoxFlag_DrawSideLeft|UI_BoxFlag_DrawSideBottom|UI_BoxFlag_DrawSideRight|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawHotEffects|UI_BoxFlag_DrawActiveEffects)
             UI_HoverCursor(OS_Cursor_UpLeft)
             b = ui_build_box_from_stringf(0, "##top_left -> down");
-          b->hot_t += hot_t;
-          b->active_t += active_t;
           sig3 = ui_signal_from_box(b);
         }
 
@@ -6235,8 +6231,6 @@ ik_ui_selection(void)
             UI_Flags(UI_BoxFlag_DrawSideBottom|UI_BoxFlag_DrawSideRight|UI_BoxFlag_MouseClickable|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawHotEffects|UI_BoxFlag_DrawActiveEffects)
             UI_HoverCursor(OS_Cursor_DownRight)
             b = ui_build_box_from_stringf(0, "###bottom_right -> anchor");
-          b->hot_t += hot_t;
-          b->active_t += active_t;
           sig1 = ui_signal_from_box(b);
         }
 
@@ -6255,8 +6249,6 @@ ik_ui_selection(void)
             UI_Flags(UI_BoxFlag_DrawSideLeft|UI_BoxFlag_DrawSideBottom|UI_BoxFlag_DrawSideTop|UI_BoxFlag_MouseClickable|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawHotEffects|UI_BoxFlag_DrawActiveEffects)
             UI_HoverCursor(OS_Cursor_DownRight)
             b = ui_build_box_from_stringf(0, "##bottom_right -> left");
-          b->hot_t += hot_t;
-          b->active_t += active_t;
           sig2 = ui_signal_from_box(b);
         }
 
@@ -6275,8 +6267,6 @@ ik_ui_selection(void)
             UI_Flags(UI_BoxFlag_DrawSideTop|UI_BoxFlag_DrawSideLeft|UI_BoxFlag_DrawSideRight|UI_BoxFlag_MouseClickable|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawHotEffects|UI_BoxFlag_DrawActiveEffects)
             UI_HoverCursor(OS_Cursor_DownRight)
             b = ui_build_box_from_stringf(0, "##bottom_right -> up");
-          b->hot_t += hot_t;
-          b->active_t += active_t;
           sig3 = ui_signal_from_box(b);
         }
 
