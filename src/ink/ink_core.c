@@ -1492,18 +1492,21 @@ ik_frame(void)
         if(box->flags & IK_BoxFlag_FitText)
         {
           box->rect_size = box->text_bounds;
+          AssertAlways(box->rect_size.y != 0);
           box->ratio = box->rect_size.x/box->rect_size.y;
         }
 
         if(box->flags & IK_BoxFlag_ClampBotTextDimX)
         {
           box->rect_size.x = ClampBot(box->text_bounds.x, box->rect_size.x);
+          AssertAlways(box->rect_size.y != 0);
           box->ratio = box->rect_size.x/box->rect_size.y;
         }
 
         if(box->flags & IK_BoxFlag_ClampBotTextDimY)
         {
           box->rect_size.y = ClampBot(box->text_bounds.y, box->rect_size.y);
+          AssertAlways(box->rect_size.y != 0);
           box->ratio = box->rect_size.x/box->rect_size.y;
         }
 
@@ -1551,6 +1554,7 @@ ik_frame(void)
 
         if(!(box->flags&IK_BoxFlag_FixedRatio))
         {
+          AssertAlways(box->rect_size.y != 0);
           box->ratio = box->rect_size.x/box->rect_size.y;
         }
 
@@ -1634,10 +1638,10 @@ ik_frame(void)
 
         F32 epsilon = 0.01f;
         box->hot_t = abs_f32(is_hot-box->hot_t) < epsilon ? (F32)is_hot : box->hot_t;
-        box->active_t = abs_f32(is_hot-box->active_t) < epsilon ? (F32)is_hot : box->active_t;
-        box->focus_hot_t = abs_f32(is_hot-box->focus_hot_t) < epsilon ? (F32)is_hot : box->focus_hot_t;
-        box->focus_active_t = abs_f32(is_hot-box->focus_active_t) < epsilon ? (F32)is_hot : box->focus_active_t;
-        box->disabled_t = abs_f32(is_hot-box->disabled_t) < epsilon ? (F32)is_hot : box->disabled_t;
+        box->active_t = abs_f32(is_active-box->active_t) < epsilon ? (F32)is_active : box->active_t;
+        box->focus_hot_t = abs_f32(is_focus_hot-box->focus_hot_t) < epsilon ? (F32)is_focus_hot : box->focus_hot_t;
+        box->focus_active_t = abs_f32(is_focus_active-box->focus_active_t) < epsilon ? (F32)is_focus_active : box->focus_active_t;
+        box->disabled_t = abs_f32(is_disabled-box->disabled_t) < epsilon ? (F32)is_disabled : box->disabled_t;
 
         B32 box_is_animating = 0;
         box_is_animating = (box_is_animating || abs_f32((F32)is_hot          - box->hot_t) > 0.01f);
@@ -1674,6 +1678,7 @@ ik_frame(void)
           }
           box->position = bounds.p0;
           box->rect_size = dim_2f32(bounds);
+          AssertAlways(box->rect_size.y != 0);
           box->ratio = box->rect_size.x/box->rect_size.y;
         }
       }
@@ -2272,15 +2277,15 @@ ik_frame(void)
                 if(image->decoded)
                 {
                   image->handle = r_tex2d_alloc(R_ResourceKind_Static, R_Tex2DSampleKind_Linear, v2s32(image->x, image->y), R_Tex2DFormat_RGBA8, (void*)image->decoded);
+
+                  // free stb artifacts
+                  stbi_image_free(image->decoded);
                   image->decoded = 0;
 
                   // resize box based on image dim
                   box->ratio = (F32)image->x/image->y;
                   box->rect_size.y = box->rect_size.x/box->ratio;
                 }
-
-                // free stb artifacts
-                stbi_image_free(image->decoded);
               }
             }
 
@@ -2781,6 +2786,7 @@ ik_paste()
     {
       // image cached? -> set height based on ratio
       // FIXME: bug here, this image could still being decoding
+      AssertAlways(image->y != 0);
       ratio = (F32)image->x/image->y;
       height = width/ratio;
     }
@@ -4421,6 +4427,7 @@ IK_BOX_UPDATE(arrow)
     Vec2F32 bounds_dim = dim_2f32(bounds);
     box->position = bounds.p0;
     box->rect_size = bounds_dim;
+    AssertAlways(bounds_dim.y != 0);
     box->ratio = bounds_dim.x/bounds_dim.y;
   }
 }
