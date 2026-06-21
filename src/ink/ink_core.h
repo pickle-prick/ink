@@ -269,17 +269,15 @@ struct IK_ImageDecodeQueue
 typedef struct IK_Camera IK_Camera;
 struct IK_Camera
 {
-  Vec2F32 center;
-  F32 height;
+  Vec2F32 position;
+  F32 zoom_factor;
 
-  Vec2F32 target_center;
-  F32 target_height;
+  Vec2F32 target_position;
+  F32 target_zoom_factor;
 
   // Per-build artifacts
   Rng2F32 rect;
   Vec2F32 rect_dim;
-  F32 zoom_factor;
-  F32 last_zoom_factor;
 
   F32 zn;
   F32 zf;
@@ -812,8 +810,8 @@ struct IK_State
   Mat4x4F32             proj_mat;
   Mat4x4F32             proj_mat_inv;
   // FIXME: we should probably renaming these, it's confusing
-  Vec2F32               screen_to_world_factor;
-  Vec2F32               world_to_screen_factor;
+  F32                   screen_to_world_factor;
+  F32                   world_to_screen_factor;
 
   // mouse
   Vec2F32               mouse;
@@ -1203,7 +1201,7 @@ internal inline R_Rect2DInst *ik_dr_line(Vec2F32 a, Vec2F32 b, Vec4F32 color, F3
 internal inline R_Rect2DInst *ik_dr_line_keyed(Vec2F32 a, Vec2F32 b, Vec4F32 color, F32 line_thickness, F32 edge_softness, Vec3F32 key);
 
 // camera
-internal Rng2F32 ik_rect_from_center_size(Vec2F32 center, Vec2F32 size);
+internal Rng2F32 ik_rect_from_camera_pos_zoom(Vec2F32 pos, F32 zoom_factor);
 
 // projection
 internal Vec2F32 ik_screen_pos_in_world(Mat4x4F32 proj_view_mat_inv, Vec2F32 pos);
