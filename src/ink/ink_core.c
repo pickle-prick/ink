@@ -577,6 +577,7 @@ ik_init(OS_Handle os_wnd, R_Handle r_wnd)
     ik_state->os_wnd = os_wnd;
     ik_state->r_wnd = r_wnd;
     ik_state->dpi = os_dpi_from_window(os_wnd);
+    ik_state->num_frames_requested = 4;
     ik_state->last_dpi = ik_state->dpi;
     ik_state->window_rect = os_client_rect_from_window(os_wnd, 1);
     ik_state->window_dim = dim_2f32(ik_state->window_rect);
@@ -822,6 +823,7 @@ ik_frame(void)
 
   // ik_drawlist_reset(ik_frame_drawlist());
   arena_clear(ik_frame_arena());
+  ik_state->is_animating = 0;
 
   /////////////////////////////////
   //~ Remake drawing buckets every frame
@@ -833,7 +835,7 @@ ik_frame(void)
   /////////////////////////////////
   //~ Get events from os
   
-  OS_EventList os_events = os_get_events(ik_frame_arena(), 0);
+  OS_EventList os_events = os_get_events(ik_frame_arena(), ik_state->num_frames_requested == 0);
   {
     ik_state->last_window_rect = ik_state->window_rect;
     ik_state->last_window_dim = dim_2f32(ik_state->last_window_rect);
@@ -869,7 +871,7 @@ ik_frame(void)
   //~ Pick target hz
 
   // pick among a number of sensible targets to snap to, given how well we've been performing
-  F32 target_hz = !os_window_is_focused(ik_state->os_wnd) ? 10.0f : os_get_gfx_info()->default_refresh_rate;
+  F32 target_hz = !os_window_is_focused(ik_state->os_wnd) ? 30.0f : os_get_gfx_info()->default_refresh_rate;
   if(ik_state->frame_index > 32)
   {
     F32 possible_alternate_hz_targets[] = {target_hz, 60.f, 120.f, 144.f, 240.f};
@@ -1347,7 +1349,14 @@ ik_frame(void)
     camera->rect.y1 += camera->anim_rate * (camera->target_rect.y1-camera->rect.y1);
 
     camera->zoom_t += ik_state->animation.slow_rate * ((F32)is_zooming-camera->zoom_t);
-    if(abs_f32(camera->zoom_t-(F32)is_zooming) < 0.001) camera->zoom_t = (F32)is_zooming;
+    if(abs_f32(camera->zoom_t-(F32)is_zooming) < 0.01) camera->zoom_t = (F32)is_zooming;
+
+    B32 camera_is_animating = 0;
+    camera_is_animating = (camera_is_animating || abs_f32(camera->rect.x0 - camera->target_rect.x0) > 0.01);
+    camera_is_animating = (camera_is_animating || abs_f32(camera->rect.y0 - camera->target_rect.y0) > 0.01);
+    camera_is_animating = (camera_is_animating || abs_f32(camera->rect.x1 - camera->target_rect.x1) > 0.01);
+    camera_is_animating = (camera_is_animating || abs_f32(camera->rect.y1 - camera->target_rect.y1) > 0.01);
+    ik_state->is_animating = ik_state->is_animating || camera_is_animating;
   }
 
   // NOTE(k): since we are not using view_mat, it's a indentity matrix, so proj_mat == proj_view_mat
@@ -1623,12 +1632,21 @@ ik_frame(void)
         box->focus_active_t += ik_state->animation.fast_rate * ((F32)is_focus_active-box->focus_active_t);
         box->disabled_t += ik_state->animation.fast_rate * ((F32)is_disabled-box->disabled_t);
 
-        F32 epsilon = 1e-2;
+        F32 epsilon = 0.01f;
         box->hot_t = abs_f32(is_hot-box->hot_t) < epsilon ? (F32)is_hot : box->hot_t;
         box->active_t = abs_f32(is_hot-box->active_t) < epsilon ? (F32)is_hot : box->active_t;
         box->focus_hot_t = abs_f32(is_hot-box->focus_hot_t) < epsilon ? (F32)is_hot : box->focus_hot_t;
         box->focus_active_t = abs_f32(is_hot-box->focus_active_t) < epsilon ? (F32)is_hot : box->focus_active_t;
         box->disabled_t = abs_f32(is_hot-box->disabled_t) < epsilon ? (F32)is_hot : box->disabled_t;
+
+        B32 box_is_animating = 0;
+        box_is_animating = (box_is_animating || abs_f32((F32)is_hot          - box->hot_t) > 0.01f);
+        box_is_animating = (box_is_animating || abs_f32((F32)is_active       - box->active_t) > 0.01f);
+        box_is_animating = (box_is_animating || abs_f32((F32)is_disabled     - box->disabled_t) > 0.01f);
+        box_is_animating = (box_is_animating || abs_f32((F32)is_focus_hot    - box->focus_hot_t) > 0.01f);
+        box_is_animating = (box_is_animating || abs_f32((F32)is_focus_active - box->focus_active_t) > 0.01f);
+        // box_is_animating = (box_is_animating || abs_f32((F32)is_focus_active_disabled - b->focus_active_disabled_t) > 0.01f);
+        ik_state->is_animating = (ik_state->is_animating || box_is_animating);
       }
     }
 
@@ -2159,7 +2177,18 @@ ik_frame(void)
   // override cursor
   if(!ui_state->grab_cursor && cursor_override)
   {
+    // FIXME: this will cause os push a event to the window, but why ui hover works
     os_set_cursor(next_cursor);
+  }
+
+  if(ui_animating_from_state(ui_state))
+  {
+    ik_request_frame();
+  }
+
+  if(ik_state->is_animating)
+  {
+    ik_request_frame();
   }
 
   /////////////////////////////////
@@ -2391,7 +2420,7 @@ ik_frame(void)
 
   // submit drawing bucket
   ProfScope("submit")
-  if(os_window_is_focused(ik_state->os_wnd))
+  // if(os_window_is_focused(ik_state->os_wnd))
   {
     r_begin_frame();
     r_window_begin_frame(ik_state->os_wnd, ik_state->r_wnd);
@@ -2461,6 +2490,7 @@ ik_frame(void)
   ik_state->frame_index++;
   ik_state->time_in_seconds += ik_state->frame_dt;
   ik_state->time_in_us += frame_time_us;
+  if(ik_state->num_frames_requested > 0) ik_state->num_frames_requested -= 1;
 
   ////////////////////////////////
   //~ Pop frame ctx
@@ -2496,6 +2526,12 @@ internal IK_DrawList *
 ik_frame_drawlist()
 {
   return ik_state->drawlists[ik_state->frame_index % ArrayCount(ik_state->drawlists)];
+}
+
+internal void
+ik_request_frame()
+{
+  ik_state->num_frames_requested = 4;
 }
 
 // editor
@@ -5590,7 +5626,7 @@ ik_ui_stats(void)
     UI_Row
       UI_PrefWidth(ui_text_dim(1, 1.0))
     {
-      ui_labelf("drag start mouse");
+      ui_labelf("ui drag start mouse");
       ui_spacer(ui_pct(1.0, 0.0));
       ui_labelf("%.2f, %.2f", ui_state->drag_start_mouse.x, ui_state->drag_start_mouse.y);
     }
