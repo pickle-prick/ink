@@ -45,13 +45,12 @@ return old_value;
 
 #define M_1 64
 
-// Smallest Screen Step (pixels) = Smallest World Step x Zoom Factor
-// Smallest World Step = CameraPosition * e-7
-// Smallest Screen Step (pixels) = 0.1f
-// Max Zoom <= 0.1e7 / CameraPosition
-#define max_pan_offset 10000.0f // world unit
-static float max_zoom_factor = 0.1e7f / max_pan_offset;
-static float min_zoom_factor = 0.02f;
+// 3840 x 2160
+
+const static F32 MAX_JITTER      = 0.1;  // Maximum visual jitter threshold in pixels
+const static F32 MAX_ZOOM_FACTOR = 30.f; // Zoom in
+const static F32 MIN_ZOOM_FACTOR = 0.1f; // Zoom out
+const static F32 CANVAS_SIZE     = ((MAX_JITTER * 8388608.f) / MAX_ZOOM_FACTOR);
 
 // TODO(Next): maybe we could use metagen
 // Color palette
@@ -1336,7 +1335,7 @@ ik_frame(void)
           target_zoom_factor *= zoom_step;
         }
 
-        target_zoom_factor = Clamp(min_zoom_factor, target_zoom_factor, max_zoom_factor);
+        target_zoom_factor = Clamp(MIN_ZOOM_FACTOR, target_zoom_factor, MAX_ZOOM_FACTOR);
 
         if(target_zoom_factor != camera->target_zoom_factor)
         {
@@ -1349,9 +1348,8 @@ ik_frame(void)
           Vec2F32 world_delta = sub_2f32(ik_state->mouse_in_world, mouse_in_world_after);
           Assert(isfinite(world_delta.x) && isfinite(world_delta.y));
 
-          camera->target_position = add_2f32(camera->position, world_delta);
-          camera->target_position.x = Clamp(-max_pan_offset, camera->target_position.x, max_pan_offset);
-          camera->target_position.y = Clamp(-max_pan_offset, camera->target_position.y, max_pan_offset);
+          Vec2F32 next_position = add_2f32(camera->position, world_delta);
+          camera->target_position = ik_capped_camera_position(next_position, target_zoom_factor);
           camera->target_zoom_factor = target_zoom_factor;
         }
 
@@ -1374,8 +1372,7 @@ ik_frame(void)
       delta.x *= ik_state->screen_to_world_factor;
       delta.y *= ik_state->screen_to_world_factor;
       Vec2F32 next_pos = add_2f32(drag.drag_start_pos, delta);
-      next_pos.x = Clamp(-max_pan_offset, next_pos.x, max_pan_offset);
-      next_pos.y = Clamp(-max_pan_offset, next_pos.y, max_pan_offset);
+      next_pos = ik_capped_camera_position(next_pos, camera->target_zoom_factor);
       camera->target_position = camera->position = next_pos;
     }
 
@@ -1440,12 +1437,13 @@ ik_frame(void)
   ////////////////////////////////
   //- window resized
 
-  // if(ik_state->window_res_changed)
-  // {
-  //   if(ik_state->window_dim.x != 0 && ik_state->window_dim.y != 0)
-  //   {
-  //   }
-  // }
+  if(ik_state->window_res_changed)
+  {
+    if(ik_state->window_dim.x != 0 && ik_state->window_dim.y != 0)
+    {
+      camera->target_position = ik_capped_camera_position(camera->target_position, camera->target_zoom_factor);
+    }
+  }
 
   ////////////////////////////////
   //- ik state begin build
@@ -1621,9 +1619,10 @@ ik_frame(void)
         {
           Vec2F32 box_center = center_2f32(rect);
           Vec2F32 viewport_half_size = scale_2f32(ik_state->window_dim, 0.5f*ik_state->screen_to_world_factor);
-          frame->camera.target_position = sub_2f32(box_center, viewport_half_size);
-          frame->camera.target_position.x = Clamp(-max_pan_offset, frame->camera.target_position.x, max_pan_offset);
-          frame->camera.target_position.y = Clamp(-max_pan_offset, frame->camera.target_position.y, max_pan_offset);
+
+          Vec2F32 next_pos = sub_2f32(box_center, viewport_half_size);
+          next_pos = ik_capped_camera_position(next_pos, frame->camera.target_zoom_factor);
+          frame->camera.target_position = next_pos;
           frame->camera.anim_rate = ik_state->animation.slug_rate;
           ik_kill_action();
         }
@@ -2289,12 +2288,12 @@ ik_frame(void)
 
     // Draw cavans bounds
     {
-      Rng2F32 rect = {-max_pan_offset, -max_pan_offset, max_pan_offset, max_pan_offset};
-      // Rng2F32 rect = {0, 0, max_pan_offset, max_pan_offset};
-      Vec4F32 color = v4f32(1,1,1,1);
+      Rng2F32 rect = {-CANVAS_SIZE, -CANVAS_SIZE, CANVAS_SIZE, CANVAS_SIZE};
+      Vec4F32 color = v4f32(1,0,0,1);
       F32 border_thickness = 4.0f*ik_state->screen_to_world_factor;
       F32 edge_softness = 1.0f*ik_state->screen_to_world_factor;
       dr_rect(rect, color, 0,border_thickness,edge_softness);
+      printf("CANVAS_SIZE: %f\n", CANVAS_SIZE);
     }
 
     // NOTE(k): since we are now using pixel-perfect object picking, the drawing order matters 
@@ -7468,7 +7467,7 @@ ik_ui_bottom_bar()
 
   UI_Parent(container)
   {
-    F32 zoom_level = round_f32(ik_state->screen_to_world_factor*100);
+    F32 zoom_level = round_f32(ik_state->world_to_screen_factor*100);
 
     // Reset Camera zoom level
     UI_Transparency(0.3)
@@ -8755,9 +8754,10 @@ ik_frame_from_tyml(String8 path)
   {
     Vec2F32 position = se_v2f32_from_tag(camera_node, str8_lit("position"));
     F32 zoom_factor = se_f32_from_tag(camera_node, str8_lit("zoom_factor"));
+    zoom_factor = Clamp(MIN_ZOOM_FACTOR, zoom_factor, MAX_ZOOM_FACTOR);
+    position = ik_capped_camera_position(position, zoom_factor);
+
     frame->camera.target_position = position;
-    frame->camera.target_position.x = Clamp(-max_pan_offset, frame->camera.target_position.x, max_pan_offset);
-    frame->camera.target_position.y = Clamp(-max_pan_offset, frame->camera.target_position.y, max_pan_offset);
     frame->camera.target_zoom_factor = zoom_factor;
   }
 
@@ -8987,6 +8987,39 @@ ik_rect_from_camera_pos_zoom(Vec2F32 pos, F32 zoom_factor)
   Rng2F32 ret;
   ret.p0 = pos;
   ret.p1 = add_2f32(scale_2f32(ik_state->window_dim, 1.0f/zoom_factor), pos);
+  return ret;
+}
+
+internal Vec2F32
+ik_capped_camera_position(Vec2F32 pos, F32 zoom_factor)
+{
+  Vec2F32 ret = {0};
+  ret.x = Clamp(-CANVAS_SIZE, pos.x, CANVAS_SIZE);
+  ret.y = Clamp(-CANVAS_SIZE, pos.y, CANVAS_SIZE);
+
+  Vec2F32 viewport_world_size = scale_2f32(ik_state->window_dim, 1.0f/zoom_factor);
+  Vec2F32 next_viewport_p1 = add_2f32(ret, viewport_world_size);
+
+  if(next_viewport_p1.x > CANVAS_SIZE)
+  {
+    F32 fixup_x = CANVAS_SIZE - next_viewport_p1.x;
+    ret.x += fixup_x;
+  }
+  if(next_viewport_p1.y > CANVAS_SIZE)
+  {
+    F32 fixup_y = CANVAS_SIZE - next_viewport_p1.y;
+    ret.y += fixup_y;
+  }
+
+  return ret;
+}
+
+internal Vec2F32
+ik_capped_position(Vec2F32 pos)
+{
+  Vec2F32 ret = {0};
+  ret.x = Clamp(-CANVAS_SIZE, pos.x, CANVAS_SIZE);
+  ret.y = Clamp(-CANVAS_SIZE, pos.y, CANVAS_SIZE);
   return ret;
 }
 

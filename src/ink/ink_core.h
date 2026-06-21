@@ -1202,6 +1202,8 @@ internal inline R_Rect2DInst *ik_dr_line_keyed(Vec2F32 a, Vec2F32 b, Vec4F32 col
 
 // camera
 internal Rng2F32 ik_rect_from_camera_pos_zoom(Vec2F32 pos, F32 zoom_factor);
+internal Vec2F32 ik_capped_camera_position(Vec2F32 pos, F32 zoom_factor);
+internal Vec2F32 ik_capped_position(Vec2F32 pos);
 
 // projection
 internal Vec2F32 ik_screen_pos_in_world(Mat4x4F32 proj_view_mat_inv, Vec2F32 pos);
