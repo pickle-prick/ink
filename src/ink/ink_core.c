@@ -853,19 +853,21 @@ ik_frame(void)
   /////////////////////////////////
   //~ Get events from os
   
-  OS_EventList os_events = os_get_events(ik_frame_arena(), ik_state->num_frames_requested == 0);
+  ik_state->last_window_rect = ik_state->window_rect;
+  ik_state->last_window_dim = dim_2f32(ik_state->last_window_rect);
+  ik_state->window_rect = os_client_rect_from_window(ik_state->os_wnd, 0);
+  ik_state->window_res_changed = ik_state->window_rect.x0 != ik_state->last_window_rect.x0 || ik_state->window_rect.x1 != ik_state->last_window_rect.x1 || ik_state->window_rect.y0 != ik_state->last_window_rect.y0 || ik_state->window_rect.y1 != ik_state->last_window_rect.y1;
+  ik_state->window_dim = dim_2f32(ik_state->window_rect);
+  ik_state->last_mouse = ik_state->mouse;
+  ik_state->mouse = os_window_is_focused(ik_state->os_wnd) ? os_mouse_from_window(ik_state->os_wnd) : v2f32(-100,-100);
+  ik_state->mouse_delta = sub_2f32(ik_state->mouse, ik_state->last_mouse);
+  ik_state->last_dpi = ik_state->dpi;
+  ik_state->dpi = os_dpi_from_window(ik_state->os_wnd);
+  if(ik_state->window_res_changed)
   {
-    ik_state->last_window_rect = ik_state->window_rect;
-    ik_state->last_window_dim = dim_2f32(ik_state->last_window_rect);
-    ik_state->window_rect = os_client_rect_from_window(ik_state->os_wnd, 0);
-    ik_state->window_res_changed = ik_state->window_rect.x0 != ik_state->last_window_rect.x0 || ik_state->window_rect.x1 != ik_state->last_window_rect.x1 || ik_state->window_rect.y0 != ik_state->last_window_rect.y0 || ik_state->window_rect.y1 != ik_state->last_window_rect.y1;
-    ik_state->window_dim = dim_2f32(ik_state->window_rect);
-    ik_state->last_mouse = ik_state->mouse;
-    ik_state->mouse = os_window_is_focused(ik_state->os_wnd) ? os_mouse_from_window(ik_state->os_wnd) : v2f32(-100,-100);
-    ik_state->mouse_delta = sub_2f32(ik_state->mouse, ik_state->last_mouse);
-    ik_state->last_dpi = ik_state->dpi;
-    ik_state->dpi = os_dpi_from_window(ik_state->os_wnd);
+    ik_request_frame();
   }
+  OS_EventList os_events = os_get_events(ik_frame_arena(), ik_state->num_frames_requested == 0);
 
   /////////////////////////////////
   //~ Calculate avg length in us of last many frames
