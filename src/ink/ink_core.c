@@ -2268,6 +2268,7 @@ ik_frame(void)
     //- screen space drawing (background)
 
     dr_push_viewport(ik_state->window_dim);
+
     // draw a background
     {
       Rng2F32 rect = {0,0, ik_state->window_dim.x, ik_state->window_dim.y};
@@ -2285,6 +2286,16 @@ ik_frame(void)
     dr_push_viewport(viewport);
     // TODO(Next): what heck? should it be column major?
     dr_push_xform2d(transpose_3x3f32(xform2d));
+
+    // Draw cavans bounds
+    {
+      Rng2F32 rect = {-max_pan_offset, -max_pan_offset, max_pan_offset, max_pan_offset};
+      // Rng2F32 rect = {0, 0, max_pan_offset, max_pan_offset};
+      Vec4F32 color = v4f32(1,1,1,1);
+      F32 border_thickness = 4.0f*ik_state->screen_to_world_factor;
+      F32 edge_softness = 1.0f*ik_state->screen_to_world_factor;
+      dr_rect(rect, color, 0,border_thickness,edge_softness);
+    }
 
     // NOTE(k): since we are now using pixel-perfect object picking, the drawing order matters 
     IK_Box *roots[] = {frame->blank, frame->box_list.first, frame->select};
