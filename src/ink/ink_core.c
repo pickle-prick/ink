@@ -576,7 +576,7 @@ ik_init(OS_Handle os_wnd, R_Handle r_wnd)
     ik_state->os_wnd = os_wnd;
     ik_state->r_wnd = r_wnd;
     ik_state->dpi = os_dpi_from_window(os_wnd);
-    ik_state->last_dpi = ik_state->last_dpi;
+    ik_state->last_dpi = ik_state->dpi;
     ik_state->window_rect = os_client_rect_from_window(os_wnd, 1);
     ik_state->window_dim = dim_2f32(ik_state->window_rect);
     ik_state->drag_state_arena = arena_alloc();
@@ -2651,7 +2651,7 @@ ik_selection_push(IK_Box *box)
   IK_Box *select = ik_selection_box();
   // FIXME: bug here, if child is already within a group, it can't be selected, it's parent should be selected
   // FIXME: bug here, selection could be cleared, but all box selected are captured, but still point to select box
-  // AssertAlways(box->parent == 0);
+  AssertAlways(box->parent == 0 && box->next == 0 && box->prev == 0);
   DLLPushFront(select->first, select->last, box);
   select->children_count++;
   box->parent = select;
@@ -7357,7 +7357,7 @@ ik_ui_hsva_picker(String8 string, Vec4F32 *rgba)
                                          ArrayCount(ik_state->edit_buffer.buffer),
                                          &ik_state->edit_buffer.string_size,
                                          value_string,
-                                         push_str8f(ui_build_arena(), "RBGA_%s", labels[i]))))
+                                         push_str8f(ui_build_arena(), "RGBA_%s", labels[i]))))
             {
               String8 edit_string = str8(ik_state->edit_buffer.buffer, ik_state->edit_buffer.string_size);
               if(edit_string.size > 0)
