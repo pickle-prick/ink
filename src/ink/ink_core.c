@@ -2730,6 +2730,16 @@ ik_paste()
       else
       {
         root = ik_box_clone(src);
+
+      }
+
+      // capture
+      {
+        IK_BoxAction *action = ik_box_action_capture(root);
+        for(IK_Box *b = action->first_captured; b != 0; b = b->capture_next)
+        {
+          b->flags |= IK_BoxFlag_Deleted;
+        }
       }
 
       Vec2F32 offset = sub_2f32(ik_state->mouse_in_world, src->position);
@@ -4033,6 +4043,10 @@ IK_BOX_UPDATE(stroke)
           box->rect_size = bounds_dim;
           box->ratio = bounds_dim.x/bounds_dim.y;
         }
+
+        // capture node
+        IK_BoxAction *action = ik_box_action_capture(box);
+        action->first_captured->flags |= IK_BoxFlag_Deleted;
       }
 
       if(taken)
@@ -4687,14 +4701,30 @@ ik_undo()
       b->capture_next = 0;
       b->capture_source = 0;
 
+      // swap
       IK_Box temp = {0};
       MemoryCopy(&temp, b, sizeof(IK_Box)); // b -> tmep
       MemoryCopy(b, source, sizeof(IK_Box)); // source -> b
       MemoryCopy(source, &temp, sizeof(IK_Box)); // temp -> source
 
-      b->capture_source = source;
+      // restore the typology
+      source->hash_next = b->hash_next;
+      source->hash_prev = b->hash_prev;
+      source->list_next = b->list_next;
+      source->list_prev = b->list_prev;
+      source->free_next = b->free_next;
+      source->parent = b->parent;
+      source->first = b->first;
+      source->last = b->last;
+      source->next = b->next;
+      source->prev = b->prev;
+      source->children_count = b->children_count;
+      source->select_next = b->select_next;
+      source->select_prev = b->select_prev;
       b->capture_next = next;
+      b->capture_source = source;
 
+      // draw next frame
       source->draw_frame_index = ik_state->frame_index+1;
     }
     ret = 1;
@@ -4719,13 +4749,28 @@ ik_redo()
       b->capture_next = 0;
       b->capture_source = 0;
 
+      // swap
       IK_Box temp = {0};
       MemoryCopy(&temp, b, sizeof(IK_Box)); // b -> tmep
       MemoryCopy(b, source, sizeof(IK_Box)); // source -> b
       MemoryCopy(source, &temp, sizeof(IK_Box)); // temp -> source
 
-      b->capture_source = source;
+      // restore the typology
+      source->hash_next = b->hash_next;
+      source->hash_prev = b->hash_prev;
+      source->list_next = b->list_next;
+      source->list_prev = b->list_prev;
+      source->free_next = b->free_next;
+      source->parent = b->parent;
+      source->first = b->first;
+      source->last = b->last;
+      source->next = b->next;
+      source->prev = b->prev;
+      source->children_count = b->children_count;
+      source->select_next = b->select_next;
+      source->select_prev = b->select_prev;
       b->capture_next = next;
+      b->capture_source = source;
 
       source->draw_frame_index = ik_state->frame_index+1;
     }
