@@ -47,10 +47,10 @@ return old_value;
 
 // 3840 x 2160
 
-const static F32 MAX_JITTER      = 0.1;  // Maximum visual jitter threshold in pixels
-const static F32 MAX_ZOOM_FACTOR = 30.f; // Zoom in
-const static F32 MIN_ZOOM_FACTOR = 0.1f; // Zoom out
-const static F32 CANVAS_SIZE     = ((MAX_JITTER * 8388608.f) / MAX_ZOOM_FACTOR);
+#define MAX_JITTER      0.1  // Maximum visual jitter threshold in pixels
+#define MAX_ZOOM_FACTOR 30.f // Zoom in
+#define MIN_ZOOM_FACTOR 0.1f // Zoom out
+#define CANVAS_SIZE     ((MAX_JITTER * 8388608.f) / MAX_ZOOM_FACTOR)
 
 // TODO(Next): maybe we could use metagen
 // Color palette
