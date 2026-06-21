@@ -4,10 +4,10 @@ BUILD_TARGET := ink
 BUILD_COMPILER := clang
 
 build_debug:
-	./build.sh $(BUILD_TARGET) $(BUILD_COMPILER) profile
+	./build.sh $(BUILD_TARGET) $(BUILD_COMPILER)
 build_full:
 	make clean
-	./build.sh $(BUILD_TARGET) $(BUILD_COMPILER) shader meta profile
+	./build.sh $(BUILD_TARGET) $(BUILD_COMPILER) shader meta
 run_full:
 	make build_full
 	./build/$(BUILD_TARGET)
