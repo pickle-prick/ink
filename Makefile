@@ -22,4 +22,4 @@ run:
 	make build_debug
 	pushd ./build; ./$(BUILD_TARGET); popd
 r:
-	./build/$(BUILD_TARGET)
+	pushd ./build; ./$(BUILD_TARGET); popd

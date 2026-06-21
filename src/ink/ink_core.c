@@ -1320,6 +1320,7 @@ ik_frame(void)
         F32 target_height = Clamp(ik_state->window_dim.y*0.01f, camera->target_height * scale, ik_state->window_dim.y*3000000);
         F32 target_width = target_height * (ik_state->window_ratio);
         Rng2F32 target_rect = ik_rect_from_center_size(camera->center, v2f32(target_width, target_height));
+        Vec2F32 wtf = dim_2f32(target_rect);
 
         // Anchor mouse pos in world
         Mat4x4F32 proj_mat_after = make_orthographic_vulkan_4x4f32(target_rect.x0, target_rect.x1, target_rect.y1, target_rect.y0, camera->zn, camera->zf);
@@ -2188,6 +2189,12 @@ ik_frame(void)
     if(ik_tool() == IK_ToolKind_Text)
     {
       next_cursor = OS_Cursor_IBar;
+      cursor_override = 1;
+    }
+
+    if(ik_tool() == IK_ToolKind_Draw)
+    {
+      next_cursor = OS_Cursor_Cross;
       cursor_override = 1;
     }
   }
@@ -6246,7 +6253,8 @@ ik_ui_selection(void)
     p1.y = (p1.y*0.5+0.5) * ik_state->window_dim.y + 1;
 
     Rng2F32 rect = r2f32p(p0.x, p0.y, p1.x, p1.y);
-    rect = pad_2f32(rect, mix_1f32(8.f, 4.5f, box->hot_t));
+    // rect = pad_2f32(rect, mix_1f32(8.f, 4.5f, box->hot_t));
+    rect = pad_2f32(rect, 8.0f);
     Vec2F32 center = center_2f32(rect);
     // F32 padding_px = ui_top_font_size()*0.5;
     F32 padding_px = 0.0;
