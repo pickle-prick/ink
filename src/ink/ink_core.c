@@ -2419,8 +2419,9 @@ ik_frame(void)
   ik_state->pre_cpu_time_us = os_now_microseconds()-begin_time_us;
 
   // submit drawing bucket
+  B32 can_submit = ik_state->window_dim.x > 0 && ik_state->window_dim.y > 0;
   ProfScope("submit")
-  // if(os_window_is_focused(ik_state->os_wnd))
+  if(can_submit)
   {
     r_begin_frame();
     r_window_begin_frame(ik_state->os_wnd, ik_state->r_wnd);
