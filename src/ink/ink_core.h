@@ -1135,6 +1135,8 @@ internal void      ik_ui_hsva_picker(String8 string, Vec4F32 *rgba);
 internal UI_Signal ik_ui_checkbox(String8 key_string, B32 b);
 internal UI_Signal ik_ui_button(String8 string);
 internal UI_Signal ik_ui_buttonf(char *fmt, ...);
+internal UI_Signal ik_ui_radio_button(String8 string, B32 selected);
+internal UI_Signal ik_ui_radio_buttonf(B32 selected, char *fmt, ...);
 internal UI_Signal ik_ui_slider_f32(String8 string, F32 *value, F32 px_to_val);
 internal UI_Signal ik_ui_range_slider_f32(String8 string, F32 *value, F32 max, F32 min);
 internal void      ik_ui_color_palette(String8 string, Vec4F32 *colors, U64 color_count, Vec4F32 *current);

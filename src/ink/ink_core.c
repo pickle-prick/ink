@@ -6881,21 +6881,12 @@ ik_ui_inspector(void)
               for(U64 i = 0; i < ArrayCount(slots); i++)
               {
                 char *display = displays[i];
-                IK_FontSlot font_slot = slots[i];
-                UI_BoxFlags flags = UI_BoxFlag_MouseClickable|UI_BoxFlag_DrawText|UI_BoxFlag_DrawBorder|UI_BoxFlag_DrawHotEffects|UI_BoxFlag_DrawActiveEffects;
-                if(b->font_slot == font_slot)
-                {
-                  flags |= UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawDropShadow;
-                }
-
-                UI_Signal sig;
-                UI_Flags(flags)
-                UI_Palette(ui_build_palette(ui_top_palette(), .background = ik_rgba_from_theme_color(IK_ThemeColor_Breakpoint)))
-                sig = ui_signal_from_box(ui_build_box_from_string(0, str8_cstring(display)));
+                B32 selected = b->font_slot == slots[i];
+                UI_Signal sig = ik_ui_radio_button(str8_cstring(display), selected);
 
                 if(ui_clicked(sig))
                 {
-                  b->font_slot = font_slot;
+                  b->font_slot = slots[i];
                 }
               }
             }
@@ -7928,6 +7919,63 @@ ik_ui_buttonf(char *fmt, ...)
   String8 string = push_str8fv(scratch.arena, fmt, args);
   va_end(args);
   UI_Signal sig = ik_ui_button(string);
+  scratch_end(scratch);
+  return sig;
+}
+
+internal UI_Signal
+ik_ui_radio_button(String8 string, B32 selected)
+{
+  UI_Signal sig;
+  F32 padding_px = 4.f;
+  F32 corner_radius = 1.0;
+
+  UI_Box *container;
+  UI_CornerRadius(corner_radius)
+    UI_Flags(UI_BoxFlag_DrawBorder|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawDropShadow)
+    UI_PrefWidth(ui_children_sum(1.0))
+    UI_Palette(ik_ui_palette_from_code(IK_PaletteCode_PlainButton))
+    container = ui_build_box_from_string(0, string);
+
+  UI_Parent(container)
+    UI_PrefWidth(ui_children_sum(1.0))
+    UI_HeightFill
+    UI_Column
+    UI_Padding(ui_px(padding_px, 1))
+    UI_Row
+    UI_Padding(ui_px(padding_px, 1))
+  {
+    if(selected)
+    {
+      ui_set_next_palette(ik_ui_palette_from_code(IK_PaletteCode_NegativePopButton));
+    }
+
+    UI_Box *b;
+    UI_CornerRadius(corner_radius)
+      UI_Flags(UI_BoxFlag_MouseClickable|
+               UI_BoxFlag_DrawBorder|
+               UI_BoxFlag_DrawBackground|
+               UI_BoxFlag_DrawHotEffects|
+               UI_BoxFlag_DrawText|
+               UI_BoxFlag_DrawActiveEffects|
+               UI_BoxFlag_DrawDropShadow)
+      UI_PrefWidth(ui_text_dim(1, 1.0))
+      b = ui_build_box_from_stringf(0, "%S###body", string);
+    sig = ui_signal_from_box(b);
+  }
+
+  return sig;
+}
+
+internal UI_Signal
+ik_ui_radio_buttonf(B32 selected, char *fmt, ...)
+{
+  Temp scratch = scratch_begin(0,0);
+  va_list args;
+  va_start(args, fmt);
+  String8 string = push_str8fv(scratch.arena, fmt, args);
+  va_end(args);
+  UI_Signal sig = ik_ui_radio_button(string, selected);
   scratch_end(scratch);
   return sig;
 }
