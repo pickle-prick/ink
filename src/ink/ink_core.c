@@ -40,7 +40,18 @@ return old_value;
 
 #include "generated/ink.meta.c"
 
+////////////////////////////////
+// Constrants
+
 #define M_1 64
+
+// Smallest Screen Step (pixels) = Smallest World Step x Zoom Factor
+// Smallest World Step = CameraPosition * e-7
+// Smallest Screen Step (pixels) = 0.1f
+// Max Zoom <= 0.1e7 / CameraPosition
+#define max_pan_offset 10000.0f // world unit
+static float max_zoom_factor = 0.1e7f / max_pan_offset;
+static float min_zoom_factor = 0.02f;
 
 // TODO(Next): maybe we could use metagen
 // Color palette
@@ -1269,14 +1280,6 @@ ik_frame(void)
 
   // Camera control
   {
-    // Smallest Screen Step (pixels) = Smallest World Step x Zoom Factor
-    // Smallest World Step = CameraPosition * e-7
-    // Smallest Screen Step (pixels) = 0.1f
-    // Max Zoom <= 0.1e7 / CameraPosition
-    #define max_pan_offset 10000.0f // world unit
-    static float max_zoom_factor = 0.1e7f / max_pan_offset;
-    static float min_zoom_factor = 0.02f;
-
     typedef struct IK_CameraDrag IK_CameraDrag;
     struct IK_CameraDrag
     {
@@ -1347,6 +1350,8 @@ ik_frame(void)
           Assert(isfinite(world_delta.x) && isfinite(world_delta.y));
 
           camera->target_position = add_2f32(camera->position, world_delta);
+          camera->target_position.x = Clamp(-max_pan_offset, camera->target_position.x, max_pan_offset);
+          camera->target_position.y = Clamp(-max_pan_offset, camera->target_position.y, max_pan_offset);
           camera->target_zoom_factor = target_zoom_factor;
         }
 
@@ -1617,6 +1622,8 @@ ik_frame(void)
           Vec2F32 box_center = center_2f32(rect);
           Vec2F32 viewport_half_size = scale_2f32(ik_state->window_dim, 0.5f*ik_state->screen_to_world_factor);
           frame->camera.target_position = sub_2f32(box_center, viewport_half_size);
+          frame->camera.target_position.x = Clamp(-max_pan_offset, frame->camera.target_position.x, max_pan_offset);
+          frame->camera.target_position.y = Clamp(-max_pan_offset, frame->camera.target_position.y, max_pan_offset);
           frame->camera.anim_rate = ik_state->animation.slug_rate;
           ik_kill_action();
         }
@@ -8738,6 +8745,8 @@ ik_frame_from_tyml(String8 path)
     Vec2F32 position = se_v2f32_from_tag(camera_node, str8_lit("position"));
     F32 zoom_factor = se_f32_from_tag(camera_node, str8_lit("zoom_factor"));
     frame->camera.target_position = position;
+    frame->camera.target_position.x = Clamp(-max_pan_offset, frame->camera.target_position.x, max_pan_offset);
+    frame->camera.target_position.y = Clamp(-max_pan_offset, frame->camera.target_position.y, max_pan_offset);
     frame->camera.target_zoom_factor = zoom_factor;
   }
 
