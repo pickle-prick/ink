@@ -6213,17 +6213,18 @@ ik_ui_selection(void)
 
     if(box == last_box)
     {
-      F32 eps = 1e-2 * ik_state->screen_to_world_factor.x;
+      F32 eps = 1e-1 * ik_state->screen_to_world_factor.x;
       box_rect.x0 += ik_state->animation.vast_rate*(target_box_rect.x0 - box_rect.x0);
       box_rect.y0 += ik_state->animation.slow_rate*(target_box_rect.y0 - box_rect.y0);
       box_rect.x1 += ik_state->animation.vast_rate*(target_box_rect.x1 - box_rect.x1);
       box_rect.y1 += ik_state->animation.slow_rate*(target_box_rect.y1 - box_rect.y1);
 
       B32 is_animating = 0;
-      is_animating = is_animating || abs_f32(box_rect.x0-target_box_rect.x0) > eps;
-      is_animating = is_animating || abs_f32(box_rect.y0-target_box_rect.y0) > eps;
-      is_animating = is_animating || abs_f32(box_rect.x1-target_box_rect.x1) > eps;
-      is_animating = is_animating || abs_f32(box_rect.y1-target_box_rect.y1) > eps;
+      if(abs_f32(box_rect.x0-target_box_rect.x0) > eps) { is_animating=1; } else { box_rect.x0 = target_box_rect.x0; };
+      if(abs_f32(box_rect.y0-target_box_rect.y0) > eps) { is_animating=1; } else { box_rect.y0 = target_box_rect.y0; };
+      if(abs_f32(box_rect.x1-target_box_rect.x1) > eps) { is_animating=1; } else { box_rect.x1 = target_box_rect.x1; };
+      if(abs_f32(box_rect.y1-target_box_rect.y1) > eps) { is_animating=1; } else { box_rect.y1 = target_box_rect.y1; };
+
       if(is_animating)
       {
         ik_request_frame();
