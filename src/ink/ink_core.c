@@ -4524,7 +4524,8 @@ IK_BOX_DRAW(arrow)
     }
   }
 #else
-  F32 stroke_size = box->stroke_size;
+  F32 min_visiable_stroke_size = (4.5f * ik_state->dpi/96.f) * ik_state->world_to_screen_ratio.x;
+  F32 stroke_size = ClampBot(box->stroke_size, min_visiable_stroke_size);
   Vec4F32 stroke_clr = linear_from_srgba(box->stroke_color);
   // Softness proportional to screen scale for anti-aliasing
   F32 edge_softness = 1.0f * ik_state->world_to_screen_ratio.x; 
