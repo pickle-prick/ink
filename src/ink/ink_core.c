@@ -1375,6 +1375,7 @@ ik_frame(void)
   }
 
   // Build camera rect
+  if(ik_state->window_dim.x > 0 &&  ik_state->window_dim.y > 0)
   {
     F32 ratio = ik_state->window_dim.x / ik_state->window_dim.y;
     F32 width = camera->height * ratio;
@@ -1383,6 +1384,8 @@ ik_frame(void)
     Vec2F32 p1 = add_2f32(camera->center, half_size);
     camera->rect = (Rng2F32){.p0 = p0, .p1 = p1};
     camera->rect_dim = v2f32(width, camera->height);
+    camera->last_zoom_factor = camera->zoom_factor;
+    camera->zoom_factor = camera->height/ik_state->window_dim.y;
 
     F32 viewport_ratio = camera->rect_dim.x/camera->rect_dim.y;
     Assert(abs_f32(viewport_ratio - ik_state->window_ratio) < 0.01f);
@@ -1392,9 +1395,13 @@ ik_frame(void)
   ik_state->proj_mat = make_orthographic_vulkan_4x4f32(camera->rect.x0, camera->rect.x1, camera->rect.y1, camera->rect.y0, camera->zn, camera->zf);
   ik_state->proj_mat_inv = inverse_orthographic_4x4f32(ik_state->proj_mat);
   ik_state->mouse_in_world = ik_mouse_in_world(ik_state->proj_mat_inv);
-  ik_state->screen_to_world_factor = (Vec2F32){camera->rect_dim.x/ik_state->window_dim.x, camera->rect_dim.y/ik_state->window_dim.y};
+  if(ik_state->window_dim.x > 0 &&  ik_state->window_dim.y > 0)
+  {
+    ik_state->screen_to_world_factor = (Vec2F32){camera->rect_dim.x/ik_state->window_dim.x, camera->rect_dim.y/ik_state->window_dim.y};
+    ik_state->world_to_screen_factor = (Vec2F32){ik_state->window_dim.x/camera->rect_dim.x, ik_state->window_dim.y/camera->rect_dim.y};
+  }
   Assert(isfinite(ik_state->screen_to_world_factor.x) && isfinite(ik_state->screen_to_world_factor.y));
-  ik_state->world_to_screen_factor = (Vec2F32){ik_state->window_dim.x/camera->rect_dim.x, ik_state->window_dim.y/camera->rect_dim.y};
+  Assert(isfinite(ik_state->world_to_screen_factor.x) && isfinite(ik_state->world_to_screen_factor.y));
   ik_state->mouse_delta_in_world.x = ik_state->mouse_delta.x*ik_state->screen_to_world_factor.x;
   ik_state->mouse_delta_in_world.y = ik_state->mouse_delta.y*ik_state->screen_to_world_factor.y;
 
@@ -1412,7 +1419,8 @@ ik_frame(void)
   {
     if(ik_state->window_dim.x != 0 && ik_state->window_dim.y != 0)
     {
-      F32 next_height = ik_state->window_dim.y * (camera->target_height/ik_state->last_window_dim.y);
+      F32 next_height = ik_state->window_dim.y * camera->last_zoom_factor;
+      Assert(isfinite(next_height));
       camera->target_height = next_height;
     }
   }

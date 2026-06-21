@@ -278,6 +278,8 @@ struct IK_Camera
   // Per-build artifacts
   Rng2F32 rect;
   Vec2F32 rect_dim;
+  F32 zoom_factor;
+  F32 last_zoom_factor;
 
   F32 zn;
   F32 zf;
