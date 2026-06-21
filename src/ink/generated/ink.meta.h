@@ -189,6 +189,24 @@ IK_SettingCode_CodeFontSize,
 IK_SettingCode_COUNT,
 } IK_SettingCode;
 
+typedef enum IK_CmdKind
+{
+IK_CmdKind_Null,
+IK_CmdKind_Exit,
+IK_CmdKind_OpenPalette,
+IK_CmdKind_Undo,
+IK_CmdKind_Redo,
+IK_CmdKind_COUNT,
+} IK_CmdKind;
+
+typedef struct IK_CmdKindInfo IK_CmdKindInfo;
+struct IK_CmdKindInfo
+{
+String8 string;
+String8 description;
+String8 search_tags;
+};
+
 typedef struct IK_FrameNode IK_FrameNode; struct IK_FrameNode{IK_FrameNode *next; IK_Frame * v;};
 typedef struct IK_ParentNode IK_ParentNode; struct IK_ParentNode{IK_ParentNode *next; IK_Box * v;};
 typedef struct IK_FontNode IK_FontNode; struct IK_FontNode{IK_FontNode *next; FNT_Tag v;};

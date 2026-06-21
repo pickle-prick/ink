@@ -139,50 +139,6 @@ IK_StackTable:
 }
 
 ////////////////////////////////
-//~ k: Node equipments
-
-@table(flag, name_lower, type, has_default_value, default_value)
-IK_NodeEquipmentTable:
-{
-  { IK_NodeTypeFlag_Node2D           node2d            `IK_Node2D`           1 `.transform = {.scale = v2f32(1,1)}`                                          }
-  { IK_NodeTypeFlag_Node3D           node3d            `IK_Node3D`           1 `.transform = {.rotation = make_indentity_quat_f32(), .scale = v3f32(1,1,1)}` }
-  { IK_NodeTypeFlag_Camera3D         camera3d          `IK_Camera3D`         0 0                                                                             }
-  { IK_NodeTypeFlag_MeshInstance3D   mesh_inst3d       `IK_MeshInstance3D`   0 0                                                                             }
-  { IK_NodeTypeFlag_SceneInstance    scene_inst        `IK_SceneInstance`    0 0                                                                             }
-  { IK_NodeTypeFlag_AnimationPlayer  animation_player  `IK_AnimationPlayer`  0 0                                                                             }
-  { IK_NodeTypeFlag_DirectionalLight directional_light `IK_DirectionalLight` 0 0                                                                             }
-  { IK_NodeTypeFlag_PointLight       point_light       `IK_PointLight`       0 0                                                                             }
-  { IK_NodeTypeFlag_SpotLight        spot_light        `IK_SpotLight`        0 0                                                                             }
-  { IK_NodeTypeFlag_Sprite2D         sprite2d          `IK_Sprite2D`         0 0                                                                             }
-  { IK_NodeTypeFlag_Collider2D       collider2d        `IK_Collider2D`       0 0                                                                             }
-  { IK_NodeTypeFlag_AnimatedSprite2D animated_sprite2d `IK_AnimatedSprite2D` 0 0                                                                             }
-  { IK_NodeTypeFlag_TileMapLayer     tilemap_layer     `IK_TileMapLayer`     0 0                                                                             }
-  { IK_NodeTypeFlag_TileMap          tilemap           `IK_TileMap`          0 0                                                                             }
-  { IK_NodeTypeFlag_Particle3D       particle3d        `IK_Particle3D`       0 0                                                                             }
-  { IK_NodeTypeFlag_HookSpring3D     hook_spring3d     `IK_HookSpring3D`     0 0                                                                             }
-  { IK_NodeTypeFlag_Constraint3D     constraint3d      `IK_Constraint3D`     0 0                                                                             }
-  { IK_NodeTypeFlag_Rigidbody3D      rigidbody3d       `IK_Rigidbody3D`      0 0                                                                             }
-}
-
-@gen @c_file
-{
-  `#define IK_EquipTypeFlagsImpl(node, type_flags) \\`
-  `IK_NodeBucket *node_bucket = node->owner_bucket; \\`
-  @expand(IK_NodeEquipmentTable a)
-    `if(type_flags & $(a.flag)) { node->$(a.name_lower) = node_bucket->first_free_$(a.name_lower); if(node->$(a.name_lower) != 0) {SLLStackPop(node_bucket->first_free_$(a.name_lower));} else {node->$(a.name_lower) = push_array_fat_no_zero(node_bucket->arena_ref, $(a.type), node);} MemoryZeroStruct(node->$(a.name_lower)); if($(a.has_default_value)) {(*node->$(a.name_lower)) = ($(a.type)){$(a.default_value)};}}\\`;
-    `node->type_flags |= type_flags;`
-}
-
-@gen @c_file
-{
-  `#define IK_UnequipTypeFlagsImpl(node, type_flags) \\`
-  `IK_NodeBucket *node_bucket = node->owner_bucket; \\`
-  @expand(IK_NodeEquipmentTable a)
-    `if(type_flags & $(a.flag)) { SLLStackPush(node_bucket->first_free_$(a.name_lower), node->$(a.name_lower)); node->$(a.name_lower) = 0; }\\`;
-    `node->type_flags & (~type_flags);`
-}
-
-////////////////////////////////
 //~ k: Enum Display table
 
 ////////////////////////////////
@@ -511,3 +467,35 @@ IK_SettingTable:
   @expand(IK_SettingTable a) `{$(a.s32_min), $(a.s32_max)}`
 }
 
+////////////////////////////////
+//~ k: Command Table
+
+@table(name, string, display, desc, search_tags)
+IK_CmdTable:
+{
+  {Exit        "exit"         "Exit"         "Exit the program"  "exit,close,quit"  }
+  {OpenPalette "open_palette" "Open Palette" ""                  "help,cmd,palette" }
+  {Undo        "undo"         "Undo"         ""                  "undo"             }
+  {Redo        "redo"         "Redo"         ""                  "redo"             }
+}
+
+@enum IK_CmdKind:
+{
+  `Null`,
+  @expand(IK_CmdTable, a) `$(a.name)`,
+  COUNT,
+}
+
+@struct IK_CmdKindInfo:
+{
+  `String8 string`;
+  `String8 description`;
+  `String8 search_tags`;
+};
+
+@data(IK_CmdKindInfo) @c_file ik_cmd_kind_info_table:
+{
+  `{0}`,
+  @expand(IK_CmdTable, a)
+    ```{ str8_lit_comp("$(a.string)"), str8_lit_comp("$(a.desc)"), str8_lit_comp("$(a.search_tags)"), }```;
+}

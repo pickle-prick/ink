@@ -101,48 +101,6 @@ internal IK_BoxFlags ik_set_next_flags(IK_BoxFlags v) { IK_StackSetNextImpl(ik_s
 internal OS_Cursor ik_set_next_hover_cursor(OS_Cursor v) { IK_StackSetNextImpl(ik_state, HoverCursor, hover_cursor, OS_Cursor, v) }
 internal F32 ik_set_next_text_padding(F32 v) { IK_StackSetNextImpl(ik_state, TextPadding, text_padding, F32, v) }
 internal IK_TextAlign ik_set_next_text_alignment(IK_TextAlign v) { IK_StackSetNextImpl(ik_state, TextAlignment, text_alignment, IK_TextAlign, v) }
-#define IK_EquipTypeFlagsImpl(node, type_flags) \
-IK_NodeBucket *node_bucket = node->owner_bucket; \
-if(type_flags & IK_NodeTypeFlag_Node2D) { node->node2d = node_bucket->first_free_node2d; if(node->node2d != 0) {SLLStackPop(node_bucket->first_free_node2d);} else {node->node2d = push_array_fat_no_zero(node_bucket->arena_ref, IK_Node2D, node);} MemoryZeroStruct(node->node2d); if(1) {(*node->node2d) = (IK_Node2D){.transform = {.scale = v2f32(1,1)}};}}\
-if(type_flags & IK_NodeTypeFlag_Node3D) { node->node3d = node_bucket->first_free_node3d; if(node->node3d != 0) {SLLStackPop(node_bucket->first_free_node3d);} else {node->node3d = push_array_fat_no_zero(node_bucket->arena_ref, IK_Node3D, node);} MemoryZeroStruct(node->node3d); if(1) {(*node->node3d) = (IK_Node3D){.transform = {.rotation = make_indentity_quat_f32(), .scale = v3f32(1,1,1)}};}}\
-if(type_flags & IK_NodeTypeFlag_Camera3D) { node->camera3d = node_bucket->first_free_camera3d; if(node->camera3d != 0) {SLLStackPop(node_bucket->first_free_camera3d);} else {node->camera3d = push_array_fat_no_zero(node_bucket->arena_ref, IK_Camera3D, node);} MemoryZeroStruct(node->camera3d); if(0) {(*node->camera3d) = (IK_Camera3D){0};}}\
-if(type_flags & IK_NodeTypeFlag_MeshInstance3D) { node->mesh_inst3d = node_bucket->first_free_mesh_inst3d; if(node->mesh_inst3d != 0) {SLLStackPop(node_bucket->first_free_mesh_inst3d);} else {node->mesh_inst3d = push_array_fat_no_zero(node_bucket->arena_ref, IK_MeshInstance3D, node);} MemoryZeroStruct(node->mesh_inst3d); if(0) {(*node->mesh_inst3d) = (IK_MeshInstance3D){0};}}\
-if(type_flags & IK_NodeTypeFlag_SceneInstance) { node->scene_inst = node_bucket->first_free_scene_inst; if(node->scene_inst != 0) {SLLStackPop(node_bucket->first_free_scene_inst);} else {node->scene_inst = push_array_fat_no_zero(node_bucket->arena_ref, IK_SceneInstance, node);} MemoryZeroStruct(node->scene_inst); if(0) {(*node->scene_inst) = (IK_SceneInstance){0};}}\
-if(type_flags & IK_NodeTypeFlag_AnimationPlayer) { node->animation_player = node_bucket->first_free_animation_player; if(node->animation_player != 0) {SLLStackPop(node_bucket->first_free_animation_player);} else {node->animation_player = push_array_fat_no_zero(node_bucket->arena_ref, IK_AnimationPlayer, node);} MemoryZeroStruct(node->animation_player); if(0) {(*node->animation_player) = (IK_AnimationPlayer){0};}}\
-if(type_flags & IK_NodeTypeFlag_DirectionalLight) { node->directional_light = node_bucket->first_free_directional_light; if(node->directional_light != 0) {SLLStackPop(node_bucket->first_free_directional_light);} else {node->directional_light = push_array_fat_no_zero(node_bucket->arena_ref, IK_DirectionalLight, node);} MemoryZeroStruct(node->directional_light); if(0) {(*node->directional_light) = (IK_DirectionalLight){0};}}\
-if(type_flags & IK_NodeTypeFlag_PointLight) { node->point_light = node_bucket->first_free_point_light; if(node->point_light != 0) {SLLStackPop(node_bucket->first_free_point_light);} else {node->point_light = push_array_fat_no_zero(node_bucket->arena_ref, IK_PointLight, node);} MemoryZeroStruct(node->point_light); if(0) {(*node->point_light) = (IK_PointLight){0};}}\
-if(type_flags & IK_NodeTypeFlag_SpotLight) { node->spot_light = node_bucket->first_free_spot_light; if(node->spot_light != 0) {SLLStackPop(node_bucket->first_free_spot_light);} else {node->spot_light = push_array_fat_no_zero(node_bucket->arena_ref, IK_SpotLight, node);} MemoryZeroStruct(node->spot_light); if(0) {(*node->spot_light) = (IK_SpotLight){0};}}\
-if(type_flags & IK_NodeTypeFlag_Sprite2D) { node->sprite2d = node_bucket->first_free_sprite2d; if(node->sprite2d != 0) {SLLStackPop(node_bucket->first_free_sprite2d);} else {node->sprite2d = push_array_fat_no_zero(node_bucket->arena_ref, IK_Sprite2D, node);} MemoryZeroStruct(node->sprite2d); if(0) {(*node->sprite2d) = (IK_Sprite2D){0};}}\
-if(type_flags & IK_NodeTypeFlag_Collider2D) { node->collider2d = node_bucket->first_free_collider2d; if(node->collider2d != 0) {SLLStackPop(node_bucket->first_free_collider2d);} else {node->collider2d = push_array_fat_no_zero(node_bucket->arena_ref, IK_Collider2D, node);} MemoryZeroStruct(node->collider2d); if(0) {(*node->collider2d) = (IK_Collider2D){0};}}\
-if(type_flags & IK_NodeTypeFlag_AnimatedSprite2D) { node->animated_sprite2d = node_bucket->first_free_animated_sprite2d; if(node->animated_sprite2d != 0) {SLLStackPop(node_bucket->first_free_animated_sprite2d);} else {node->animated_sprite2d = push_array_fat_no_zero(node_bucket->arena_ref, IK_AnimatedSprite2D, node);} MemoryZeroStruct(node->animated_sprite2d); if(0) {(*node->animated_sprite2d) = (IK_AnimatedSprite2D){0};}}\
-if(type_flags & IK_NodeTypeFlag_TileMapLayer) { node->tilemap_layer = node_bucket->first_free_tilemap_layer; if(node->tilemap_layer != 0) {SLLStackPop(node_bucket->first_free_tilemap_layer);} else {node->tilemap_layer = push_array_fat_no_zero(node_bucket->arena_ref, IK_TileMapLayer, node);} MemoryZeroStruct(node->tilemap_layer); if(0) {(*node->tilemap_layer) = (IK_TileMapLayer){0};}}\
-if(type_flags & IK_NodeTypeFlag_TileMap) { node->tilemap = node_bucket->first_free_tilemap; if(node->tilemap != 0) {SLLStackPop(node_bucket->first_free_tilemap);} else {node->tilemap = push_array_fat_no_zero(node_bucket->arena_ref, IK_TileMap, node);} MemoryZeroStruct(node->tilemap); if(0) {(*node->tilemap) = (IK_TileMap){0};}}\
-if(type_flags & IK_NodeTypeFlag_Particle3D) { node->particle3d = node_bucket->first_free_particle3d; if(node->particle3d != 0) {SLLStackPop(node_bucket->first_free_particle3d);} else {node->particle3d = push_array_fat_no_zero(node_bucket->arena_ref, IK_Particle3D, node);} MemoryZeroStruct(node->particle3d); if(0) {(*node->particle3d) = (IK_Particle3D){0};}}\
-if(type_flags & IK_NodeTypeFlag_HookSpring3D) { node->hook_spring3d = node_bucket->first_free_hook_spring3d; if(node->hook_spring3d != 0) {SLLStackPop(node_bucket->first_free_hook_spring3d);} else {node->hook_spring3d = push_array_fat_no_zero(node_bucket->arena_ref, IK_HookSpring3D, node);} MemoryZeroStruct(node->hook_spring3d); if(0) {(*node->hook_spring3d) = (IK_HookSpring3D){0};}}\
-if(type_flags & IK_NodeTypeFlag_Constraint3D) { node->constraint3d = node_bucket->first_free_constraint3d; if(node->constraint3d != 0) {SLLStackPop(node_bucket->first_free_constraint3d);} else {node->constraint3d = push_array_fat_no_zero(node_bucket->arena_ref, IK_Constraint3D, node);} MemoryZeroStruct(node->constraint3d); if(0) {(*node->constraint3d) = (IK_Constraint3D){0};}}\
-if(type_flags & IK_NodeTypeFlag_Rigidbody3D) { node->rigidbody3d = node_bucket->first_free_rigidbody3d; if(node->rigidbody3d != 0) {SLLStackPop(node_bucket->first_free_rigidbody3d);} else {node->rigidbody3d = push_array_fat_no_zero(node_bucket->arena_ref, IK_Rigidbody3D, node);} MemoryZeroStruct(node->rigidbody3d); if(0) {(*node->rigidbody3d) = (IK_Rigidbody3D){0};}}\
-node->type_flags |= type_flags;
-#define IK_UnequipTypeFlagsImpl(node, type_flags) \
-IK_NodeBucket *node_bucket = node->owner_bucket; \
-if(type_flags & IK_NodeTypeFlag_Node2D) { SLLStackPush(node_bucket->first_free_node2d, node->node2d); node->node2d = 0; }\
-if(type_flags & IK_NodeTypeFlag_Node3D) { SLLStackPush(node_bucket->first_free_node3d, node->node3d); node->node3d = 0; }\
-if(type_flags & IK_NodeTypeFlag_Camera3D) { SLLStackPush(node_bucket->first_free_camera3d, node->camera3d); node->camera3d = 0; }\
-if(type_flags & IK_NodeTypeFlag_MeshInstance3D) { SLLStackPush(node_bucket->first_free_mesh_inst3d, node->mesh_inst3d); node->mesh_inst3d = 0; }\
-if(type_flags & IK_NodeTypeFlag_SceneInstance) { SLLStackPush(node_bucket->first_free_scene_inst, node->scene_inst); node->scene_inst = 0; }\
-if(type_flags & IK_NodeTypeFlag_AnimationPlayer) { SLLStackPush(node_bucket->first_free_animation_player, node->animation_player); node->animation_player = 0; }\
-if(type_flags & IK_NodeTypeFlag_DirectionalLight) { SLLStackPush(node_bucket->first_free_directional_light, node->directional_light); node->directional_light = 0; }\
-if(type_flags & IK_NodeTypeFlag_PointLight) { SLLStackPush(node_bucket->first_free_point_light, node->point_light); node->point_light = 0; }\
-if(type_flags & IK_NodeTypeFlag_SpotLight) { SLLStackPush(node_bucket->first_free_spot_light, node->spot_light); node->spot_light = 0; }\
-if(type_flags & IK_NodeTypeFlag_Sprite2D) { SLLStackPush(node_bucket->first_free_sprite2d, node->sprite2d); node->sprite2d = 0; }\
-if(type_flags & IK_NodeTypeFlag_Collider2D) { SLLStackPush(node_bucket->first_free_collider2d, node->collider2d); node->collider2d = 0; }\
-if(type_flags & IK_NodeTypeFlag_AnimatedSprite2D) { SLLStackPush(node_bucket->first_free_animated_sprite2d, node->animated_sprite2d); node->animated_sprite2d = 0; }\
-if(type_flags & IK_NodeTypeFlag_TileMapLayer) { SLLStackPush(node_bucket->first_free_tilemap_layer, node->tilemap_layer); node->tilemap_layer = 0; }\
-if(type_flags & IK_NodeTypeFlag_TileMap) { SLLStackPush(node_bucket->first_free_tilemap, node->tilemap); node->tilemap = 0; }\
-if(type_flags & IK_NodeTypeFlag_Particle3D) { SLLStackPush(node_bucket->first_free_particle3d, node->particle3d); node->particle3d = 0; }\
-if(type_flags & IK_NodeTypeFlag_HookSpring3D) { SLLStackPush(node_bucket->first_free_hook_spring3d, node->hook_spring3d); node->hook_spring3d = 0; }\
-if(type_flags & IK_NodeTypeFlag_Constraint3D) { SLLStackPush(node_bucket->first_free_constraint3d, node->constraint3d); node->constraint3d = 0; }\
-if(type_flags & IK_NodeTypeFlag_Rigidbody3D) { SLLStackPush(node_bucket->first_free_rigidbody3d, node->rigidbody3d); node->rigidbody3d = 0; }\
-node->type_flags & (~type_flags);
 C_LINKAGE_BEGIN
 String8 ik_icon_kind_text_table[69] =
 {
@@ -1238,6 +1196,15 @@ Rng1S32 ik_setting_code_s32_range_table[9] =
 {1, 32},
 {6, 72},
 {6, 72},
+};
+
+IK_CmdKindInfo ik_cmd_kind_info_table[5] =
+{
+{0},
+{ str8_lit_comp("exit"), str8_lit_comp("Exit the program"), str8_lit_comp("exit,close,quit"), },
+{ str8_lit_comp("open_palette"), str8_lit_comp(""), str8_lit_comp("help,cmd,palette"), },
+{ str8_lit_comp("undo"), str8_lit_comp(""), str8_lit_comp("undo"), },
+{ str8_lit_comp("redo"), str8_lit_comp(""), str8_lit_comp("redo"), },
 };
 
 C_LINKAGE_END

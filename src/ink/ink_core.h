@@ -141,6 +141,31 @@ struct IK_SettingVal
 };
 
 ////////////////////////////////
+//~ Command Types
+
+typedef struct IK_Cmd IK_Cmd;
+struct IK_Cmd
+{
+  String8 name;
+};
+
+typedef struct IK_CmdNode IK_CmdNode;
+struct IK_CmdNode
+{
+  IK_CmdNode *next;
+  IK_CmdNode *prev;
+  IK_Cmd cmd;
+};
+
+typedef struct IK_CmdList IK_CmdList;
+struct IK_CmdList
+{
+  IK_CmdNode *first;
+  IK_CmdNode *last;
+  U64 count;
+};
+
+////////////////////////////////
 //~ Font slot
 
 typedef enum IK_FontSlot
@@ -745,6 +770,8 @@ struct IK_State
   U64                   frame_time_us_history[64];
   F64                   time_in_seconds;
   U64                   time_in_us;
+  U64                   num_frames_requested;
+  B32                   is_animating;
 
   // frame parameters
   F32                   frame_dt;
@@ -916,6 +943,7 @@ internal void ik_kill_focus(void);
 internal B32          ik_frame(void);
 internal Arena*       ik_frame_arena(void);
 internal IK_DrawList* ik_frame_drawlist(void);
+internal void         ik_request_frame(void);
 
 //- editor
 internal IK_ToolKind ik_tool(void);
@@ -1126,6 +1154,17 @@ internal IK_Frame* ik_frame_from_tyml(String8 path);
 
 //- image
 internal void      ik_image_to_png_file(IK_Image *image, String8 path);
+
+/////////////////////////////////
+//~ Commands
+
+// name -> info
+internal IK_CmdKind ik_cmd_kind_from_string(String8 string);
+internal IK_CmdKindInfo *ik_cmd_kind_info_from_string(String8 string);
+
+// pushing
+
+// iterating
 
 /////////////////////////////////
 //~ Helpers
