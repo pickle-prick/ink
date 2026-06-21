@@ -1269,9 +1269,13 @@ ik_frame(void)
 
   // Camera control
   {
-    static float max_pan_offset = 10000.0f; // world unit
-    static float max_zoom_factor = 0.1e7f / 10000.0f;
-    static float min_zoom_factor = 0.1f;
+    // Smallest Screen Step (pixels) = Smallest World Step x Zoom Factor
+    // Smallest World Step = CameraPosition * e-7
+    // Smallest Screen Step (pixels) = 0.1f
+    // Max Zoom <= 0.1e7 / CameraPosition
+    #define max_pan_offset 10000.0f // world unit
+    static float max_zoom_factor = 0.1e7f / max_pan_offset;
+    static float min_zoom_factor = 0.02f;
 
     typedef struct IK_CameraDrag IK_CameraDrag;
     struct IK_CameraDrag
