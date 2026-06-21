@@ -618,12 +618,12 @@ ik_init(OS_Handle os_wnd, R_Handle r_wnd)
 
   // Fonts
 #if BUILD_DEBUG
-  ik_state->cfg_font_tags[IK_FontSlot_Main] = fnt_tag_from_path(str8_lit("./data/fonts/segoeui.ttf"));
-  ik_state->cfg_font_tags[IK_FontSlot_Code] = fnt_tag_from_path(str8_lit("./data/fonts/JetBrainsMono-Regular.ttf"));
-  ik_state->cfg_font_tags[IK_FontSlot_Icons] = fnt_tag_from_path(str8_lit("./data/fonts/icons.ttf"));
-  ik_state->cfg_font_tags[IK_FontSlot_IconsExtra] = fnt_tag_from_path(str8_lit("./data/fonts/icons_extra.ttf"));
-  ik_state->cfg_font_tags[IK_FontSlot_HandWrite1] = fnt_tag_from_path(str8_lit("./data/fonts/Virgil.ttf"));
-  ik_state->cfg_font_tags[IK_FontSlot_HandWrite2] = fnt_tag_from_path(str8_lit("./data/fonts/XiaolaiMono-Regular.ttf"));
+  ik_state->cfg_font_tags[IK_FontSlot_Main] = fnt_tag_from_path(str8_lit("../data/fonts/segoeui.ttf"));
+  ik_state->cfg_font_tags[IK_FontSlot_Code] = fnt_tag_from_path(str8_lit("../data/fonts/JetBrainsMono-Regular.ttf"));
+  ik_state->cfg_font_tags[IK_FontSlot_Icons] = fnt_tag_from_path(str8_lit("../data/fonts/icons.ttf"));
+  ik_state->cfg_font_tags[IK_FontSlot_IconsExtra] = fnt_tag_from_path(str8_lit("../data/fonts/icons_extra.ttf"));
+  ik_state->cfg_font_tags[IK_FontSlot_HandWrite1] = fnt_tag_from_path(str8_lit("../data/fonts/Virgil.ttf"));
+  ik_state->cfg_font_tags[IK_FontSlot_HandWrite2] = fnt_tag_from_path(str8_lit("../data/fonts/XiaolaiMono-Regular.ttf"));
 #else
   // String8 font_mono = str8(ttf_Mplus1Code_Medium, ttf_Mplus1Code_Medium_len);
   String8 font_main = str8(ttf_segoeui, ttf_segoeui_len);
@@ -2283,7 +2283,14 @@ ik_frame(void)
           // draw rect background
           if(box->flags & IK_BoxFlag_DrawBackground && !zero_dim)
           {
-            ik_dr_rect_keyed(dst, box->background_color, 0, 0, 0, box->key_3f32);
+            Vec4F32 background_color = box->background_color;
+            if(box->flags&IK_BoxFlag_DrawBackgroundGlow)
+            {
+              background_color.x*=5;
+              background_color.y*=5;
+              background_color.z*=5;
+            }
+            ik_dr_rect_keyed(dst, background_color, 0, 0, 0, box->key_3f32);
           }
           
           // draw image
@@ -2354,9 +2361,12 @@ ik_frame(void)
             F32 border_thickness = mix_1f32(min_border_thickness, max_border_thickness, t);
             F32 corner_radius = 1.0 * ik_state->screen_to_world_factor.x;
             Vec4F32 border_color = box->border_color;
-            border_color.x*=80;
-            border_color.y*=80;
-            border_color.z*=80;
+            if(box->flags&IK_BoxFlag_DrawBorderGlow)
+            {
+              border_color.x*=5;
+              border_color.y*=5;
+              border_color.z*=5;
+            }
             ik_dr_rect_keyed(pad_2f32(dst, 0.5*border_thickness), border_color, corner_radius, border_thickness, border_thickness/2.0, box->key_3f32);
           }
 
@@ -2475,7 +2485,7 @@ ik_frame(void)
       {
         dr_crt(0.25, 1.15, ik_state->time_in_seconds);
       }
-      DR_BucketScope(ik_state->bucket_ui) dr_bloom(1.0f, 0.005f);
+      DR_BucketScope(ik_state->bucket_ui) dr_bloom(1.0f, 1.0f);
       dr_submit_bucket(ik_state->os_wnd, ik_state->r_wnd, ik_state->bucket_ui);
     }
     Vec3F32 key_3f32 = r_window_end_frame(ik_state->os_wnd, ik_state->r_wnd, ik_state->mouse);
@@ -3709,13 +3719,18 @@ IK_BOX_UPDATE(text)
     for(String8Node *n = lines.first; n != 0; n = n->next, line_index++)
     {
       String8 string = n->string;
+      Vec4F32 color = box->text_color;
+      F32 scale = mix_1f32(1.f, 4.f, box->hot_t);
+      color.x *= scale;
+      color.y *= scale;
+      color.z *= scale;
       for(;;)
       {
         DR_FStrList fstrs = {0};
         DR_FStr fstr = {0};
         fstr.string = string;
         fstr.params.font = font;
-        fstr.params.color = box->text_color;
+        fstr.params.color = color;
         fstr.params.size = M_1;
         fstr.params.underline_thickness = 0;
         fstr.params.strikethrough_thickness = 0;
@@ -6807,6 +6822,12 @@ ik_ui_inspector(void)
           {
             b->flags ^= flag;
           }
+          flag = IK_BoxFlag_DrawBorderGlow;
+          on = !!(b->flags&flag);
+          UI_PrefWidth(ui_top_pref_height()) if(ui_clicked(ik_ui_checkbox(str8_lit("glow###draw_border_glow"), on)))
+          {
+            b->flags ^= flag;
+          }
         }
         ui_spacer(ui_em(0.2, 0.0));
 
@@ -6819,6 +6840,12 @@ ik_ui_inspector(void)
             ui_labelf("draw background");
           ui_spacer(ui_pct(1.0, 0.0));
           UI_PrefWidth(ui_top_pref_height()) if(ui_clicked(ik_ui_checkbox(str8_lit("draw_background"), on)))
+          {
+            b->flags ^= flag;
+          }
+          flag = IK_BoxFlag_DrawBackgroundGlow;
+          on = !!(b->flags&flag);
+          UI_PrefWidth(ui_top_pref_height()) if(ui_clicked(ik_ui_checkbox(str8_lit("glow###draw_background_glow"), on)))
           {
             b->flags ^= flag;
           }

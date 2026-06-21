@@ -465,6 +465,10 @@ typedef U64 IK_BoxFlags;
 # define IK_BoxFlag_DrawTag               (IK_BoxFlags)(1ull<<37) // FIXME: oginize the order later
 # define IK_BoxFlag_Deleted               (IK_BoxFlags)(1ull<<38) // FIXME: oginize the order later
 # define IK_BoxFlag_Transient             (IK_BoxFlags)(1ull<<39) // FIXME: oginize the order later
+# define IK_BoxFlag_DrawBackgroundGlow    (IK_BoxFlags)(1ull<<40) // FIXME: oginize the order later
+# define IK_BoxFlag_DrawBorderGlow        (IK_BoxFlags)(1ull<<41) // FIXME: oginize the order later
+# define IK_BoxFlag_DrawTextGlow          (IK_BoxFlags)(1ull<<42) // FIXME: oginize the order later
+# define IK_BoxFlag_DrawStrokeGlow        (IK_BoxFlags)(1ull<<43) // FIXME: oginize the order later
 
 // compound flags
 #define IK_BoxFlag_Dragable (IK_BoxFlag_DragToScaleFontSize|IK_BoxFlag_DragToScalePoint|IK_BoxFlag_DragToScaleRectSize|IK_BoxFlag_DragToPosition|IK_BoxFlag_DragToScaleStrokeSize|IK_BoxFlag_DragToScaleStrokeSize)

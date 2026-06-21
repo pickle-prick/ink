@@ -64,16 +64,16 @@ entry_point(CmdLine *cmd_line)
   //~ Init
 
   // change working directory
-  String8 binary_path = os_get_process_info()->binary_path; // only directory
-  {
-    Temp scratch = scratch_begin(0,0);
-    String8List parts = str8_split_path(scratch.arena, binary_path);
-    str8_list_push(scratch.arena, &parts, str8_lit(".."));
-    str8_path_list_resolve_dots_in_place(&parts, PathStyle_SystemAbsolute);
-    String8 working_directory = push_str8_copy(scratch.arena, str8_path_list_join_by_style(scratch.arena, &parts, PathStyle_SystemAbsolute));
-    os_set_current_path(working_directory);
-    scratch_end(scratch);
-  }
+  // String8 binary_path = os_get_process_info()->binary_path; // only directory
+  // {
+  //   Temp scratch = scratch_begin(0,0);
+  //   String8List parts = str8_split_path(scratch.arena, binary_path);
+  //   str8_list_push(scratch.arena, &parts, str8_lit(".."));
+  //   str8_path_list_resolve_dots_in_place(&parts, PathStyle_SystemAbsolute);
+  //   String8 working_directory = push_str8_copy(scratch.arena, str8_path_list_join_by_style(scratch.arena, &parts, PathStyle_SystemAbsolute));
+  //   os_set_current_path(working_directory);
+  //   scratch_end(scratch);
+  // }
 
   // seeding
   U32 seed = time(NULL);
