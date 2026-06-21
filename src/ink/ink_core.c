@@ -4264,7 +4264,7 @@ IK_BOX_UPDATE(stroke)
 IK_BOX_DRAW(stroke)
 {
   ProfBeginFunction();
-#if 1
+#if 0
   F32 base_stroke_size = box->stroke_size;
   F32 min_visiable_stroke_size = (4*ik_state->dpi/96.f) * ik_state->screen_to_world_factor.x;
 
@@ -4352,9 +4352,9 @@ IK_BOX_DRAW(stroke)
   F32 velocity_filter = 0.0f; // Smoothed velocity
 
   // Tweak these to change the "feel"
-  F32 thinning_factor = 0.9f; // How much it thins when fast (0.0 = no change, 0.9 = very thin)
-  F32 responsiveness = 0.2f;  // How fast thickness reacts to speed changes (0.1 = slow/smooth, 0.5 = twitchy)
-  F32 max_velocity = (4.0f*ik_state->dpi/96.f) * ik_state->screen_to_world_factor.x; // Velocity cap for calculation
+  F32 thinning_factor = 0.9f; 
+  F32 responsiveness = 0.4f;  
+  F32 max_velocity = (4.0f*ik_state->dpi/96.f) * ik_state->screen_to_world_factor.x; 
 
   U64 point_index = 0;
   while(p2)
@@ -4364,29 +4364,20 @@ IK_BOX_DRAW(stroke)
     Vec2F32 ctrl = p1->position;
     Vec2F32 m2 = {(p1->position.x+p2->position.x) * 0.5f, (p1->position.y+p2->position.y) * 0.5f};
 
+    F32 prev_width = current_width;
+
     // Calculate Stroke Width Physics
     {
       F32 dist = length_2f32(sub_2f32(p0->position, p1->position));
-
-      // Normalize velocity (0.0 to 1.0)
       F32 velocity = Clamp(0, dist, max_velocity) / max_velocity;
-
-      // Smooth the velocity to prevent lumps (0.0 to 1.0)
       velocity_filter = velocity_filter * (1.0f - responsiveness) + velocity * responsiveness;
-
-      // Ink Logic: Faster = Thinner
       F32 target_width = base_stroke_size * (1.0f - (velocity_filter * thinning_factor));
 
-      // Taper Logic: Force start to be thin
       if(point_index < 3)
       {
-        for(int i = point_index; i < 3; i++)
-        {
-          target_width *= 0.8;
-        }
+        for(int i = point_index; i < 3; i++) target_width *= 0.8f;
       }
 
-      // Smooth the width transition
       current_width = current_width * (1.0f - responsiveness) + target_width * responsiveness;
       current_width = Max(current_width, min_visiable_stroke_size);
     }
@@ -4397,20 +4388,26 @@ IK_BOX_DRAW(stroke)
       Vec2F32 b_p1 = ctrl;
       Vec2F32 b_p2 = m2;
 
-      // Dynamic step count based on length and curvature makes it smoother
       F32 seg_len = length_2f32(sub_2f32(b_p0, b_p2));
       F32 curvature = length_2f32(sub_2f32(scale_2f32(add_2f32(b_p0, b_p2), 0.5f), b_p1));
 
-      // More steps if long or very curved
-      U64 steps = (U64)((seg_len + curvature * 2.0f) * (2.0f * ik_state->world_to_screen_factor.x)); 
-      steps = Clamp(4, steps, 60);
+      // OPTIMIZATION: Calculate screen space metrics
+      F32 screen_len = seg_len * ik_state->world_to_screen_factor.x;
+      F32 screen_curve = curvature * ik_state->world_to_screen_factor.x;
+      F32 width_diff_in_pixels = abs_f32(current_width - prev_width) * ik_state->world_to_screen_factor.x;
+
+      // 1. Base steps: 1 step for every ~4 screen pixels
+      U64 steps = (U64)(screen_len * 0.25f); 
+      // 2. Add a few steps for sharp curves
+      steps += (U64)(screen_curve * 0.5f); 
+      // 3. Add steps ONLY if width changes drastically (0.5 steps per pixel of difference)
+      steps += (U64)(width_diff_in_pixels * 0.5f); 
+
+      // STRICT CLAMP: Cap at 16 (Down from 100!). 
+      // 16 steps over a short curve is virtually indistinguishable from 100 but 6x faster.
+      steps = Clamp(3, steps, 16);
 
       Vec2F32 prev = b_p0;
-
-      // We calculate a per-sub-segment width lerp if we want it really smooth, 
-      // but for dr_line_keyed, constant width per Bezier segment is usually okay.
-      // If you see "stepping" in thickness, we can lerp width inside this loop too.
-      F32 segment_width = current_width; 
 
       for(U64 i = 1; i <= steps; i++)
       {
@@ -4422,26 +4419,46 @@ IK_BOX_DRAW(stroke)
           u*u*b_p0.y + 2*u*t*b_p1.y + t*t*b_p2.y
         };
 
-        dr_line_keyed(prev, pt, stroke_color, segment_width, edge_softness, box->key_3f32);
+        F32 step_width = prev_width + (current_width - prev_width) * t;
+
+        dr_line_keyed(prev, pt, stroke_color, step_width, edge_softness, box->key_3f32);
         prev = pt;
       }
     }
 
-    // Advance
     p0 = p1;
     p1 = p2;
     p2 = p2->next;
     point_index++;
 
-    // Handle the very last segment
-    if(!p2)
+    // Handle the very last segment (Optimized)
+    if(!p2 && p1)
     {
-      // Simply draw a line to the final real point
-      // Ideally we taper this out too
-      // FIXME: this is too small
-      // dr_line_keyed(m2, p1->position, stroke_color, min_visiable_stroke_size, edge_softness, box->key_3f32);
+      Vec2F32 last_p0 = m2;
+      Vec2F32 last_p1 = p1->position;
+      
+      F32 last_screen_len = length_2f32(sub_2f32(last_p0, last_p1)) * ik_state->world_to_screen_factor.x;
+      
+      // Clamp heavily here too
+      U64 last_steps = Clamp(2, (U64)(last_screen_len * 0.25f), 10);
+      
+      Vec2F32 prev_last = last_p0;
+      for(U64 i = 1; i <= last_steps; i++)
+      {
+        F32 t = (F32)i / (F32)last_steps;
+        Vec2F32 pt = {
+          last_p0.x + (last_p1.x - last_p0.x) * t,
+          last_p0.y + (last_p1.y - last_p0.y) * t
+        };
+        
+        F32 step_width = current_width + (min_visiable_stroke_size - current_width) * t;
+        
+        dr_line_keyed(prev_last, pt, stroke_color, step_width, edge_softness, box->key_3f32);
+        prev_last = pt;
+      }
     }
   }
+
 #endif
   ProfEnd();
 }
@@ -4543,7 +4560,7 @@ IK_BOX_DRAW(arrow)
   F32 stroke_size = box->stroke_size;
   F32 half_stroke_size = box->stroke_size*0.5;
   Vec4F32 stroke_clr = box->stroke_color;
-  F32 edge_softness = 1.0 * ik_state->world_to_screen_ratio.x;
+  F32 edge_softness = 1.0 * ik_state->screen_to_world_factor.x;
 
   // draw a
   {
@@ -4590,13 +4607,13 @@ IK_BOX_DRAW(arrow)
     Vec2F32 p2 = b;
 
     // decide step size 
-    F32 dist_px = length_2f32(sub_2f32(p0,p2))/ik_state->world_to_screen_ratio.x;
+    F32 dist_px = length_2f32(sub_2f32(p0,p2))/ik_state->screen_to_world_factor.x;
     U64 steps = floor_f32(dist_px/4.0);
     steps = Clamp(1, steps, 30);
 
     Vec2F32 prev = p0;
     F32 last_scaled_stroke_size = stroke_size;
-    F32 min_visiable_stroke_size = (2*ik_state->dpi/96.f) * ik_state->world_to_screen_ratio.x;
+    F32 min_visiable_stroke_size = (2*ik_state->dpi/96.f) * ik_state->screen_to_world_factor.x;
     for(U64 i = 1; i <= steps; i++)
     {
       F32 scaled_stroke_size = last_scaled_stroke_size*0.96f;
@@ -4618,9 +4635,8 @@ IK_BOX_DRAW(arrow)
   }
 #else
   F32 min_visiable_stroke_size = (4.5f * ik_state->dpi/96.f) * ik_state->screen_to_world_factor.x;
-  F32 stroke_size = ClampBot(box->stroke_size, min_visiable_stroke_size);
+  F32 stroke_size = Max(box->stroke_size, min_visiable_stroke_size);
   Vec4F32 stroke_clr = linear_from_srgba(box->stroke_color);
-  // Softness proportional to screen scale for anti-aliasing
   F32 edge_softness = 1.0f * ik_state->screen_to_world_factor.x; 
 
   IK_Point *pa = box->first_point;
@@ -4631,104 +4647,90 @@ IK_BOX_DRAW(arrow)
   Vec2F32 m = pm->position;
   Vec2F32 b = pb->position;
 
-  // Geometry: Calculate Control Point (C)
-  // We want the curve to pass through M (Midpoint) at t=0.5
-  // Formula: P1 = 2*M - 0.5*(P0 + P2)
+  // Geometry: Calculate Control Point (C) so the curve passes exactly through M
   Vec2F32 c = sub_2f32(scale_2f32(m, 2.0f), scale_2f32(add_2f32(a, b), 0.5f));
 
-  // Draw the Shaft (The Curve)
+  // --- 1. DRAW THE SHAFT ---
   {
-    // Heuristic: More steps if long or curvy
     F32 seg_len = length_2f32(sub_2f32(a, b));
-    F32 curvature = length_2f32(sub_2f32(scale_2f32(add_2f32(a, b), 0.5f), c));
-    U64 steps = (U64)((seg_len + curvature * 2.0f) * (4.0f * ik_state->world_to_screen_factor.x));
-    steps = Clamp(10, steps, 100);
+    F32 screen_len = seg_len * ik_state->world_to_screen_factor.x;
+
+    // Optimized steps: ~1 step every 5 screen pixels.
+    // Because thickness is constant, we don't need many steps at all.
+    U64 steps = Clamp(8, (U64)(screen_len * 0.2f), 64);
 
     Vec2F32 prev = a;
 
-    // Draw start dot (Anchor)
-    // Rng2F32 start_dot = r2f32p(a.x - stroke_size/2, a.y - stroke_size/2, a.x + stroke_size/2, a.y + stroke_size/2);
-    // dr_rect_keyed(start_dot, stroke_clr, stroke_size, 0, edge_softness, box->key_3f32);
+    // Draw the rounded start anchor (Tail of the arrow)
+    Rng2F32 start_cap = r2f32p(a.x - stroke_size/2, a.y - stroke_size/2, a.x + stroke_size/2, a.y + stroke_size/2);
+    dr_rect_keyed(start_cap, stroke_clr, stroke_size, stroke_size * 0.5f, edge_softness, box->key_3f32);
 
     for(U64 i = 1; i <= steps; i++)
     {
       F32 t = (F32)i / (F32)steps;
       F32 u = 1.0f - t;
 
-      // Quadratic Bezier Formula
       Vec2F32 pt = {
         u*u*a.x + 2*u*t*c.x + t*t*b.x,
         u*u*a.y + 2*u*t*c.y + t*t*b.y
       };
 
-      // Taper Logic:
-      // Only taper the very first 10% of the line for a "pen down" effect.
-      // otherwise keep it full width. Looks stronger.
-      F32 width = stroke_size;
-      if(t < 0.1f) width *= (0.5f + (t / 0.1f) * 0.5f);
+      // Draw the straight body segment
+      dr_line_keyed(prev, pt, stroke_clr, stroke_size, edge_softness, box->key_3f32);
 
-      // Draw Segment
-      dr_line_keyed(prev, pt, stroke_clr, width, edge_softness, box->key_3f32);
-
-      // Draw Round Joint (Kneecap)
-      Rng2F32 joint = r2f32p(pt.x - width/2, pt.y - width/2, pt.x + width/2, pt.y + width/2);
-      dr_rect_keyed(joint, stroke_clr, width, 0, edge_softness, box->key_3f32);
+      // Stamp a circle at the joint. This connects segments seamlessly without cracks.
+      Rng2F32 joint = r2f32p(pt.x - stroke_size/2, pt.y - stroke_size/2, pt.x + stroke_size/2, pt.y + stroke_size/2);
+      dr_rect_keyed(joint, stroke_clr, stroke_size, stroke_size * 0.5f, edge_softness, box->key_3f32);
 
       prev = pt;
     }
   }
 
-  // Draw the Arrowhead
+  // --- 2. DRAW THE ARROWHEAD ---
   {
-    // Calculate Tangent at end of curve (t=1)
-    // Derivative of Quad Bezier at t=1 is 2*(P2 - P1) => 2*(b - c)
-    // We normalize this to get the direction.
+    // Direction of the arrow (tangent at the tip)
     Vec2F32 dir = normalize_2f32(sub_2f32(b, c));
-
-    // Fallback if b == c (straight line case), calculate from a to b
     if(length_2f32(dir) < 0.001f)
     {
       dir = normalize_2f32(sub_2f32(b, a));
     }
 
-    // Geometry Settings
-    F32 arrow_len = stroke_size * 5.0f; // Length of the wings
-    F32 arrow_angle = 0.5f; // Radians (~28 degrees), sharper looks faster
-    arrow_angle = turns_from_radians_f32(arrow_angle);
+    F32 arrow_len = stroke_size * 4.0f; 
+    F32 arrow_angle = 28.0f/360.0f; // ~28 degrees in radians
 
-    // Rotate direction vector
     F32 cos_a = cos_f32(arrow_angle);
     F32 sin_a = sin_f32(arrow_angle);
 
-    // Left Wing Direction
     Vec2F32 v_left = {
       dir.x * cos_a - dir.y * sin_a,
       dir.x * sin_a + dir.y * cos_a
     };
 
-    // Right Wing Direction
     Vec2F32 v_right = {
       dir.x * cos_a + dir.y * sin_a,
       -dir.x * sin_a + dir.y * cos_a
     };
 
-    // Calculate Wing End Points (Going backwards from tip)
     Vec2F32 p_left = sub_2f32(b, scale_2f32(v_left, arrow_len));
     Vec2F32 p_right = sub_2f32(b, scale_2f32(v_right, arrow_len));
 
-    // Draw Left Wing
-    dr_line_keyed(b, p_left, stroke_clr, stroke_size, edge_softness, box->key_3f32);
+    // Shift the wing start points slightly down the shaft.
+    // This stops the sharp rectangular corners of the wings from poking out of the tip cap.
+    Vec2F32 b_wing_start = sub_2f32(b, scale_2f32(dir, stroke_size * 0.3f));
+
+    // Draw Left Wing (Line + Rounded End Cap)
+    dr_line_keyed(b_wing_start, p_left, stroke_clr, stroke_size, edge_softness, box->key_3f32);
     Rng2F32 l_cap = r2f32p(p_left.x - stroke_size/2, p_left.y - stroke_size/2, p_left.x + stroke_size/2, p_left.y + stroke_size/2);
-    dr_rect_keyed(l_cap, stroke_clr, stroke_size, 0, edge_softness, box->key_3f32);
+    dr_rect_keyed(l_cap, stroke_clr, stroke_size, stroke_size * 0.5f, edge_softness, box->key_3f32);
 
-    // Draw Right Wing
-    dr_line_keyed(b, p_right, stroke_clr, stroke_size, edge_softness, box->key_3f32);
+    // Draw Right Wing (Line + Rounded End Cap)
+    dr_line_keyed(b_wing_start, p_right, stroke_clr, stroke_size, edge_softness, box->key_3f32);
     Rng2F32 r_cap = r2f32p(p_right.x - stroke_size/2, p_right.y - stroke_size/2, p_right.x + stroke_size/2, p_right.y + stroke_size/2);
-    dr_rect_keyed(r_cap, stroke_clr, stroke_size, 0, edge_softness, box->key_3f32);
+    dr_rect_keyed(r_cap, stroke_clr, stroke_size, stroke_size * 0.5f, edge_softness, box->key_3f32);
 
-    // Draw Tip Cap (To make the point rounded and flush)
+    // Draw main Tip Cap (Makes the very front of the arrow perfectly round)
     Rng2F32 tip_cap = r2f32p(b.x - stroke_size/2, b.y - stroke_size/2, b.x + stroke_size/2, b.y + stroke_size/2);
-    dr_rect_keyed(tip_cap, stroke_clr, stroke_size, 0, edge_softness, box->key_3f32);
+    dr_rect_keyed(tip_cap, stroke_clr, stroke_size, stroke_size * 0.5f, edge_softness, box->key_3f32);
   }
 #endif
 }
