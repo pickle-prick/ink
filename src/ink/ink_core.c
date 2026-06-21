@@ -1151,19 +1151,6 @@ ik_frame(void)
   ik_push_font_slot(frame->cfg.text_font_slot);
 
   ////////////////////////////////
-  //~ Unpack camera
-
-  IK_Camera *camera = &frame->camera;
-  // NOTE(k): since we are not using view_mat, it's a indentity matrix, so proj_mat == proj_view_mat
-  ik_state->proj_mat = make_orthographic_vulkan_4x4f32(camera->rect.x0, camera->rect.x1, camera->rect.y1, camera->rect.y0, camera->zn, camera->zf);
-  ik_state->proj_mat_inv = inverse_4x4f32(ik_state->proj_mat);
-  ik_state->mouse_in_world = ik_mouse_in_world(ik_state->proj_mat_inv);
-  Vec2F32 camera_rect_dim = dim_2f32(camera->rect);
-  ik_state->world_to_screen_ratio = (Vec2F32){camera_rect_dim.x/ik_state->window_dim.x, camera_rect_dim.y/ik_state->window_dim.y};
-  ik_state->mouse_delta_in_world.x = ik_state->mouse_delta.x*ik_state->world_to_screen_ratio.x;
-  ik_state->mouse_delta_in_world.y = ik_state->mouse_delta.y*ik_state->world_to_screen_ratio.y;
-
-  ////////////////////////////////
   //~ Messages Processing (purge+animating)
 
   for(IK_Message *msg = ik_state->messages.first, *next = 0;
@@ -1193,7 +1180,7 @@ ik_frame(void)
   //~ Build Debug UI
 
   // FIXME: potential performance issues
-  ik_ui_cmd_palette();
+  // ik_ui_cmd_palette();
   ik_ui_man_page();
   ik_ui_toolbar();
   ik_ui_bottom_bar();
@@ -1250,32 +1237,11 @@ ik_frame(void)
   ik_state->events = &ui_events; // NOTE(k): ui_events is stored on the stack
 
   ////////////////////////////////
-  //~ Main scene building
+  //~ Unpack camera
 
-  // unpack ctx
-  B32 cursor_override = 0;
-  OS_Cursor next_cursor = 0;
+  IK_Camera *camera = &frame->camera;
 
-  ////////////////////////////////
-  //- window resized
-
-  if(ik_state->window_res_changed)
-  {
-    if(ik_state->window_dim.x != 0 && ik_state->window_dim.y != 0)
-    {
-      Vec2F32 camera_dim = dim_2f32(camera->target_rect);
-      F32 area = camera_dim.x*camera_dim.y;
-      F32 ratio = ik_state->window_dim.x/ik_state->window_dim.y;
-      F32 y = sqrt_f32(area/ratio);
-      F32 x = ratio*y;
-      camera->target_rect.y1 = camera->target_rect.y0 + y;
-      camera->target_rect.x1 = camera->target_rect.x0 + x;
-    }
-  }
-
-  ////////////////////////////////
-  //- camera control
-
+  // Camera control
   {
     typedef struct IK_CameraDrag IK_CameraDrag;
     struct IK_CameraDrag
@@ -1382,6 +1348,39 @@ ik_frame(void)
 
     camera->zoom_t += ik_state->animation.slow_rate * ((F32)is_zooming-camera->zoom_t);
     if(abs_f32(camera->zoom_t-(F32)is_zooming) < 0.001) camera->zoom_t = (F32)is_zooming;
+  }
+
+  // NOTE(k): since we are not using view_mat, it's a indentity matrix, so proj_mat == proj_view_mat
+  ik_state->proj_mat = make_orthographic_vulkan_4x4f32(camera->rect.x0, camera->rect.x1, camera->rect.y1, camera->rect.y0, camera->zn, camera->zf);
+  ik_state->proj_mat_inv = inverse_4x4f32(ik_state->proj_mat);
+  ik_state->mouse_in_world = ik_mouse_in_world(ik_state->proj_mat_inv);
+  Vec2F32 camera_rect_dim = dim_2f32(camera->rect);
+  ik_state->world_to_screen_ratio = (Vec2F32){camera_rect_dim.x/ik_state->window_dim.x, camera_rect_dim.y/ik_state->window_dim.y};
+  ik_state->mouse_delta_in_world.x = ik_state->mouse_delta.x*ik_state->world_to_screen_ratio.x;
+  ik_state->mouse_delta_in_world.y = ik_state->mouse_delta.y*ik_state->world_to_screen_ratio.y;
+
+  ////////////////////////////////
+  //~ Main scene building
+
+  // unpack ctx
+  B32 cursor_override = 0;
+  OS_Cursor next_cursor = 0;
+
+  ////////////////////////////////
+  //- window resized
+
+  if(ik_state->window_res_changed)
+  {
+    if(ik_state->window_dim.x != 0 && ik_state->window_dim.y != 0)
+    {
+      Vec2F32 camera_dim = dim_2f32(camera->target_rect);
+      F32 area = camera_dim.x*camera_dim.y;
+      F32 ratio = ik_state->window_dim.x/ik_state->window_dim.y;
+      F32 y = sqrt_f32(area/ratio);
+      F32 x = ratio*y;
+      camera->target_rect.y1 = camera->target_rect.y0 + y;
+      camera->target_rect.x1 = camera->target_rect.x0 + x;
+    }
   }
 
   ////////////////////////////////
@@ -1503,6 +1502,7 @@ ik_frame(void)
         // dragging -> reposition
 
         // TODO(Next): IK_BoxFlag_DragToPosition and IK_BoxFlag_FitChildren are in conflict
+
         if((box->sig.f&IK_SignalFlag_LeftDragging) &&
             box->flags&IK_BoxFlag_DragToPosition &&
             (!ik_key_match(box->key, ik_state->focus_active_box_key)))
@@ -1519,16 +1519,18 @@ ik_frame(void)
             // NOTE(k): camera rect could be animating, casuing world mouse delta change even mouse in screen didn't change
             F32 epsilon = (ik_state->dpi/96.f)*2.f;
             F32 drag_px = length_2f32(sub_2f32(drag.drag_start_mouse, ik_state->mouse));
-            if(drag.drag_started ? 1 : drag_px > epsilon)
+            if(drag.drag_started || drag_px > epsilon)
             {
+              if(!drag.drag_started)
+              {
+                ik_box_action_capture(box);
+                drag.drag_started = 1;
+                ik_store_drag_struct(&drag);
+              }
               Vec2F32 delta = sub_2f32(ik_state->mouse_in_world, drag.drag_start_mouse_in_world);
               Vec2F32 position = add_2f32(drag.drag_start_rect.p0, delta);
               Vec2F32 position_delta = sub_2f32(position, box->position);
               ik_box_do_translate(box, position_delta);
-
-              if(!drag.drag_started) ik_box_action_capture(box);
-              drag.drag_started = 1;
-              ik_store_drag_struct(&drag);
             }
           }
         }
@@ -6163,13 +6165,13 @@ ik_ui_selection(void)
               Vec2F32 scale_delta = v2f32(new_rect_size.x/box_rect_dim.x, new_rect_size.y/box_rect_dim.y);
               F32 px_changed = abs_f32(new_rect_size.x-box_rect_dim.x) + abs_f32(new_rect_size.y-box_rect_dim.y);
 
-              if(scale_delta.x > 0 && scale_delta.y > 0 && px_changed > 1.0)
+              if(drag.drag_started || (scale_delta.x > 0 && scale_delta.y > 0 && px_changed > 1.0))
               {
                 if(!drag.drag_started)
                 {
                   ik_box_action_capture(box);
                   drag.drag_started = 1;
-                  ik_store_drag_struct(&drag);
+                  ui_store_drag_struct(&drag);
                 }
                 Vec2F32 pivot = {box->position.x+box->rect_size.x, box->position.y+box->rect_size.y};
                 ik_box_do_scale(box, scale_delta, pivot);
@@ -6290,13 +6292,13 @@ ik_ui_selection(void)
               Vec2F32 scale_delta = v2f32(new_rect_size.x/box_rect_dim.x, new_rect_size.y/box_rect_dim.y);
               F32 px_changed = abs_f32(new_rect_size.x-box_rect_dim.x) + abs_f32(new_rect_size.y-box_rect_dim.y);
 
-              if(scale_delta.x > 0 && scale_delta.y > 0 && px_changed > 1.0)
+              if(drag.drag_started || (scale_delta.x > 0 && scale_delta.y > 0 && px_changed > 1.0))
               {
                 if(!drag.drag_started)
                 {
                   ik_box_action_capture(box);
                   drag.drag_started = 1;
-                  ik_store_drag_struct(&drag);
+                  ui_store_drag_struct(&drag);
                 }
                 ik_box_do_scale(box, scale_delta, box->position);
               }
