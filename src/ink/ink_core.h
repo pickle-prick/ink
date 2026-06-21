@@ -814,7 +814,7 @@ struct IK_State
 
   // image decode queue & threads
   IK_ImageDecodeQueue   decode_queue;
-  OS_Handle             decode_threads[3];
+  OS_Handle             decode_threads[4];
 
   // palette
   // IK_IconInfo           icon_info;
