@@ -1197,6 +1197,7 @@ ik_frame(void)
     msg->create_t = abs_f32(1.f-msg->create_t) < epsilon ? 1.f : msg->create_t;
     msg->expired_t = abs_f32((F32)msg->expired-msg->expired_t) < epsilon ? 1.f : msg->expired_t;
   }
+  if(ik_state->messages.first) ik_request_frame();
 
   ////////////////////////////////
   //~ Build Debug UI
@@ -6127,6 +6128,8 @@ ik_ui_selection(void)
   IK_Camera *camera = &frame->camera;
 
   IK_Box *box = ik_box_from_key(ik_state->focus_hot_box_key[IK_MouseButtonKind_Left]);
+  local_persist IK_Box *last_box = 0;
+
   if(box && ik_tool() == IK_ToolKind_Selection && (box->flags&IK_BoxFlag_Dragable))
   {
     Rng2F32 camera_rect = camera->rect;
@@ -6134,7 +6137,38 @@ ik_ui_selection(void)
     /////////////////////////////////
     // world pos to screen
 
-    Rng2F32 box_rect = ik_rect_from_box(box);
+    Rng2F32 target_box_rect = ik_rect_from_box(box);
+    local_persist Rng2F32 box_rect = {0};
+
+    // first box drawn after reset? -> set origin
+    if(last_box == 0)
+    {
+      Vec2F32 origin = ik_screen_pos_in_world(ik_state->proj_mat_inv, v2f32(0,0));
+      box_rect = (Rng2F32){.p0 = origin, .p1 = origin};
+    }
+
+    if(box == last_box)
+    {
+      box_rect.x0 += ik_state->animation.vast_rate*(target_box_rect.x0 - box_rect.x0);
+      box_rect.y0 += ik_state->animation.slow_rate*(target_box_rect.y0 - box_rect.y0);
+      box_rect.x1 += ik_state->animation.vast_rate*(target_box_rect.x1 - box_rect.x1);
+      box_rect.y1 += ik_state->animation.slow_rate*(target_box_rect.y1 - box_rect.y1);
+
+      B32 is_animating = 0;
+      is_animating = is_animating || abs_f32(box_rect.x0-target_box_rect.x0) > 0.01;
+      is_animating = is_animating || abs_f32(box_rect.y0-target_box_rect.y0) > 0.01;
+      is_animating = is_animating || abs_f32(box_rect.x1-target_box_rect.x1) > 0.01;
+      is_animating = is_animating || abs_f32(box_rect.y1-target_box_rect.y1) > 0.01;
+      if(is_animating)
+      {
+        ik_request_frame();
+      }
+      else
+      {
+        box_rect = target_box_rect;
+      }
+    }
+
     Vec4F32 p0 = {box_rect.x0, box_rect.y0, 0, 1.0};
     Vec4F32 p1 = {box_rect.x1, box_rect.y1, 0, 1.0};
     p0 = transform_4x4f32(ik_state->proj_mat, p0);
@@ -6469,6 +6503,7 @@ ik_ui_selection(void)
       }
     }
   }
+  last_box = box;
   ProfEnd();
 }
 
