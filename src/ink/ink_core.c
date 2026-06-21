@@ -1795,10 +1795,8 @@ ik_frame(void)
           // select all
           for(IK_Box *b = frame->box_list.first; b != 0; b = b->list_next)
           {
-            if(b->parent == 0)
-            {
-              ik_selection_push(b);
-            }
+            Assert(b->parent == 0 && "Handle Grouping later");
+            if(!(b->flags&IK_BoxFlag_Deleted)) ik_selection_push(b);
           }
           ik_selection_commit();
         }
@@ -1940,6 +1938,10 @@ ik_frame(void)
       box->ratio = 1.f;
       box->hover_cursor = OS_Cursor_UpDownLeftRight;
       box->draw_frame_index = ik_state->frame_index+1;
+
+      // capture
+      IK_BoxAction *action = ik_box_action_capture(box);
+      action->first_captured->flags |= IK_BoxFlag_Deleted;
 
       ik_kill_action();
       ik_state->focus_hot_box_key[IK_MouseButtonKind_Left] = box->key;
@@ -2716,14 +2718,13 @@ ik_paste()
       IK_Box *root = 0;
       if(src == ik_selection_box())
       {
-        for(IK_Box *b = src->first, *next = 0;
-            b != 0;
-            b = next)
+        for(IK_Box *b = src->first, *next = 0; b != 0; b = next)
         {
           next = b->next;
           IK_Box *cloned = ik_box_clone(b);
           DLLInsert(src->first, src->last, b, cloned);
           DLLRemove(src->first, src->last, b);
+          b->parent = 0;
         }
         root = src;
       }
@@ -3290,17 +3291,21 @@ ik_build_box_from_stringf(IK_BoxFlags flags, char *fmt, ...)
 internal IK_Box *
 ik_box_clone(IK_Box *src)
 {
+  Assert(!(src->flags&IK_BoxFlag_Deleted));
   // FIXME: this is fucking stupid, clean this mess
   Temp scratch = scratch_begin(0,0);
 
   IK_Box *parent = ik_top_parent();
   IK_Box *ret = 0;
+  // FIXME: should we skip IK_BoxFlag_Deleted
   if(!(src->flags&IK_BoxFlag_Transparent))
   {
     IK_BoxFlags flags = src->flags;
     String8 src_name = ik_display_part_from_key_string(src->name);
     // create a different key name
-    String8 dst_name = push_str8f(scratch.arena, "%S###%I64u", src_name, os_now_microseconds());
+    local_persist U64 clone_counter = 0;
+    clone_counter++;
+    String8 dst_name = push_str8f(scratch.arena, "%S###%I64u_%I64u", src_name, os_now_microseconds(), clone_counter);
     ret = ik_build_box_from_string(flags, dst_name);
     parent = ret;
 
