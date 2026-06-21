@@ -830,6 +830,7 @@ struct IK_State
   IK_WidgetPaletteInfo  widget_palette_info;
 
   // user interaction state
+  B32                   ui_txt_editing;
   IK_Key                hot_box_key;
   IK_Key                active_box_key[IK_MouseButtonKind_COUNT];
   IK_ActionSlot         action_slot;
@@ -953,6 +954,7 @@ internal IK_Key ik_drop_hot_key(void);
 //- interaction
 internal void ik_kill_action(void);
 internal void ik_kill_focus(void);
+#define ik_txt_editing() (ik_state->ui_txt_editing)
 
 //- frame
 internal B32          ik_frame(void);

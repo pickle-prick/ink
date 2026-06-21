@@ -843,6 +843,7 @@ ik_frame(void)
   // ik_drawlist_reset(ik_frame_drawlist());
   arena_clear(ik_frame_arena());
   ik_state->is_animating = 0;
+  ik_state->ui_txt_editing = 0;
 
   /////////////////////////////////
   //~ Remake drawing buckets every frame
@@ -1316,7 +1317,7 @@ ik_frame(void)
         F32 scale_unit = 1.f+zoom_step;
         F32 scale = pow_f32(scale_unit, (F32)delta.y);
 
-        F32 target_height = Clamp(ik_state->window_dim.y*0.01f, camera->target_height * scale, ik_state->window_dim.y*30);
+        F32 target_height = Clamp(ik_state->window_dim.y*0.01f, camera->target_height * scale, ik_state->window_dim.y*3000000);
         F32 target_width = target_height * (ik_state->window_ratio);
         Rng2F32 target_rect = ik_rect_from_center_size(camera->center, v2f32(target_width, target_height));
 
@@ -1830,27 +1831,28 @@ ik_frame(void)
         UI_Event *evt = &evt_node->v;
 
         B32 eat = 0;
-        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_1 && evt->modifiers == 0)
+        // NOTE(@k): press 1 would produce two events (text & key_pressed), we would either check if ui is text-editing, or we need to check again Text event  
+        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_1 && evt->modifiers == 0 && !ik_txt_editing())
         {
           ik_state->tool = IK_ToolKind_Hand;
           eat = 1;
         }
-        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_2 && evt->modifiers == 0)
+        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_2 && evt->modifiers == 0 && !ik_txt_editing())
         {
           ik_state->tool = IK_ToolKind_Selection;
           eat = 1;
         }
-        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_3 && evt->modifiers == 0)
+        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_3 && evt->modifiers == 0 && !ik_txt_editing())
         {
           ik_state->tool = IK_ToolKind_Rectangle;
           eat = 1;
         }
-        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_4 && evt->modifiers == 0)
+        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_4 && evt->modifiers == 0 && !ik_txt_editing())
         {
           ik_state->tool = IK_ToolKind_Draw;
           eat = 1;
         }
-        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_5 && evt->modifiers == 0)
+        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_5 && evt->modifiers == 0 && !ik_txt_editing())
         {
           ik_state->show_man_page = !ik_state->show_man_page;
           eat = 1;
@@ -1865,13 +1867,13 @@ ik_frame(void)
         //   ik_state->tool = IK_ToolKind_Eraser;
         //   eat = 1;
         // }
-        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_Tick && (evt->modifiers & OS_Modifier_Ctrl))
+        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_Tick && (evt->modifiers & OS_Modifier_Ctrl) && !ik_txt_editing())
         {
           ik_state->show_stats = !ik_state->show_stats;
           eat = 1;
         }
         // FIXME: this is weird, maybe we should just parse events as a CommandList
-        if(evt->kind == UI_EventKind_Navigate && evt->key == OS_Key_A && (evt->modifiers&OS_Modifier_Ctrl) && evt->delta_2s32.x == 1)
+        if(evt->kind == UI_EventKind_Navigate && evt->key == OS_Key_A && (evt->modifiers&OS_Modifier_Ctrl) && evt->delta_2s32.x == 1 && !ik_txt_editing())
         {
           // clear selection first
           ik_selection_clear();
@@ -1884,12 +1886,12 @@ ik_frame(void)
           }
           ik_selection_commit();
         }
-        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_Z && (evt->modifiers & OS_Modifier_Ctrl))
+        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_Z && (evt->modifiers & OS_Modifier_Ctrl) && !ik_txt_editing())
         {
           ik_undo();
           eat = 1;
         }
-        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_R && (evt->modifiers & OS_Modifier_Ctrl))
+        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_R && (evt->modifiers & OS_Modifier_Ctrl) && !ik_txt_editing())
         {
           eat = 1;
           ik_redo();
@@ -6633,8 +6635,15 @@ ik_ui_inspector(void)
           UI_PrefWidth(ui_text_dim(1, 1.0))
             ui_labelf("stroke_size");
           ui_spacer(ui_pct(1.0, 0.0));
-          UI_PrefWidth(ui_text_dim(1, 1.0))
-            ik_ui_slider_f32(str8_lit("stroke_size_val"), &cfg->stroke_size, 0.1);
+
+          UI_Signal sig;
+          UI_TextAlignment(UI_TextAlign_Center)
+          UI_PrefWidth(ui_px(ui_top_font_size()*6, 1.0))
+           sig = ui_f32_edit(str8_lit("stroke_size_val"), &cfg->stroke_size);
+          if(ui_is_key_auto_focus_active(sig.box->key))
+          {
+            ik_state->ui_txt_editing = 1;
+          }
         }
 
         ui_spacer(ui_em(0.2, 0.0));
