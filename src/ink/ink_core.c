@@ -111,7 +111,7 @@ ik_ui_draw()
       dr_push_tex2d_sample_kind(R_Tex2DSampleKind_Linear);
     }
 
-    // draw drop_shadw
+    // draw drop_shadow
     if(box->flags & UI_BoxFlag_DrawDropShadow)
     {
       Rng2F32 drop_shadow_rect = shift_2f32(pad_2f32(box->rect, 8), v2f32(4, 4));
@@ -7115,13 +7115,21 @@ ik_ui_inspector(void)
               UI_TextAlignment(UI_TextAlign_Center)
               if(ui_clicked(ik_ui_buttonf("-")))
               {
+                Temp scratch = scratch_begin(0,0);
+                // sort based on position x
+                IK_Box **boxes = 0;
+                for(IK_Box *child = b->first; child != 0; child = child->next) darray_push(scratch.arena, boxes, child);
+                quick_sort(boxes, darray_size(boxes), sizeof(IK_Box*), ik_box_cmp_x);
+
                 F32 advance_x = 0;
-                for(IK_Box *child = b->first; child != 0; child = child->next)
+                for(U64 i = 0; i < darray_size(boxes); i++)
                 {
+                  IK_Box *child = boxes[i];
                   F32 x = b->position.x+advance_x;
                   ik_box_do_translate(child, v2f32(x-child->position.x, 0));
                   advance_x += child->rect_size.x;
                 }
+                scratch_end(scratch);
               }
             }
           }
@@ -8644,4 +8652,17 @@ ik_bytes_from_b64string(Arena *arena, String8 src)
   }
   ProfEnd();
   return ret;
+}
+
+// cmp
+internal int
+ik_box_cmp_x(IK_Box **left, IK_Box **right)
+{
+  return (*left)->position.x - (*right)->position.x;
+}
+
+internal int
+ik_box_cmp_y(IK_Box **left, IK_Box **right)
+{
+  return (*left)->position.y - (*right)->position.y;
 }

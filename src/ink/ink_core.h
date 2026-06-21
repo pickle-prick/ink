@@ -1141,6 +1141,10 @@ internal Vec2F32 ik_screen_pos_from_world(Vec2F32 pos);
 internal String8 ik_b64string_from_bytes(Arena *arena, String8 src);
 internal String8 ik_bytes_from_b64string(Arena *arena, String8 src);
 
+// cmp
+internal int ik_box_cmp_x(IK_Box **left, IK_Box **right);
+internal int ik_box_cmp_y(IK_Box **left, IK_Box **right);
+
 ////////////////////////////////
 //~ Macro Loop Wrappers
 
