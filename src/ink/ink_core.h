@@ -185,7 +185,7 @@ typedef enum IK_FontSlot
 typedef struct IK_Cfg IK_Cfg;
 struct IK_Cfg
 {
-  F32 stroke_size;
+  F32 stroke_size; // World space size
   Vec4F32 stroke_color;
   Vec4F32 background_color;
   IK_FontSlot text_font_slot;
@@ -269,8 +269,16 @@ struct IK_ImageDecodeQueue
 typedef struct IK_Camera IK_Camera;
 struct IK_Camera
 {
+  Vec2F32 center;
+  F32 height;
+
+  Vec2F32 target_center;
+  F32 target_height;
+
+  // Per-build artifacts
   Rng2F32 rect;
-  Rng2F32 target_rect;
+  Vec2F32 rect_dim;
+
   F32 zn;
   F32 zf;
 
@@ -535,7 +543,7 @@ struct IK_Box
   // TODO(k): make it effective
   F32 transparency;
   // F32 squish;
-  F32 stroke_size;
+  F32 stroke_size; // World space size
   Vec4F32 stroke_color;
   // image
   IK_Image *image;
@@ -786,6 +794,7 @@ struct IK_State
   // window
   Rng2F32               window_rect;
   Vec2F32               window_dim;
+  F32                   window_ratio;
   Rng2F32               last_window_rect;
   Vec2F32               last_window_dim;
   B32                   window_res_changed;
@@ -1188,6 +1197,9 @@ internal inline R_Rect2DInst *ik_dr_img(Rng2F32 dst, Rng2F32 src, R_Handle textu
 internal inline R_Rect2DInst *ik_dr_img_keyed(Rng2F32 dst, Rng2F32 src, R_Handle texture, Vec4F32 color, F32 corner_radius, F32 border_thickness, F32 edge_softness, Vec3F32 key);
 internal inline R_Rect2DInst *ik_dr_line(Vec2F32 a, Vec2F32 b, Vec4F32 color, F32 line_thickness, F32 edge_softness);
 internal inline R_Rect2DInst *ik_dr_line_keyed(Vec2F32 a, Vec2F32 b, Vec4F32 color, F32 line_thickness, F32 edge_softness, Vec3F32 key);
+
+// camera
+internal Rng2F32 ik_rect_from_center_size(Vec2F32 center, Vec2F32 size);
 
 // projection
 internal Vec2F32 ik_screen_pos_in_world(Mat4x4F32 proj_view_mat_inv, Vec2F32 pos);

@@ -581,6 +581,7 @@ ik_init(OS_Handle os_wnd, R_Handle r_wnd)
     ik_state->last_dpi = ik_state->dpi;
     ik_state->window_rect = os_client_rect_from_window(os_wnd, 1);
     ik_state->window_dim = dim_2f32(ik_state->window_rect);
+    ik_state->window_ratio = ik_state->window_dim.x/ik_state->window_dim.y;
     ik_state->drag_state_arena = arena_alloc();
     ik_state->box_scratch_arena = arena_alloc();
     ik_state->tool = IK_ToolKind_Selection;
@@ -858,6 +859,7 @@ ik_frame(void)
   ik_state->window_rect = os_client_rect_from_window(ik_state->os_wnd, 0);
   ik_state->window_res_changed = ik_state->window_rect.x0 != ik_state->last_window_rect.x0 || ik_state->window_rect.x1 != ik_state->last_window_rect.x1 || ik_state->window_rect.y0 != ik_state->last_window_rect.y0 || ik_state->window_rect.y1 != ik_state->last_window_rect.y1;
   ik_state->window_dim = dim_2f32(ik_state->window_rect);
+  ik_state->window_ratio = ik_state->window_dim.x/ik_state->window_dim.y;
   ik_state->last_mouse = ik_state->mouse;
   ik_state->mouse = os_window_is_focused(ik_state->os_wnd) ? os_mouse_from_window(ik_state->os_wnd) : v2f32(-100,-100);
   ik_state->mouse_delta = sub_2f32(ik_state->mouse, ik_state->last_mouse);
@@ -1269,7 +1271,7 @@ ik_frame(void)
     typedef struct IK_CameraDrag IK_CameraDrag;
     struct IK_CameraDrag
     {
-      Rng2F32 drag_start_rect;
+      Vec2F32 drag_start_center;
       Vec2F32 drag_start_mouse;
     };
     B32 is_zooming = 0;
@@ -1284,7 +1286,7 @@ ik_frame(void)
       // camera pan begin
       if(can_pan && !is_panning && evt->kind == UI_EventKind_Press && evt->key == OS_Key_LeftMouseButton)
       {
-        IK_CameraDrag drag = {camera->target_rect, ik_state->mouse};
+        IK_CameraDrag drag = {camera->center, ik_state->mouse};
         ik_store_drag_struct(&drag);
         camera->anim_rate = ik_state->animation.fast_rate;
         is_panning = 1;
@@ -1310,29 +1312,23 @@ ik_frame(void)
         if(delta.y > 0 && delta16.y == 0) { delta16.y = +1; }
         if(delta.y < 0 && delta16.y == 0) { delta16.y = -1; }
 
-        // get normalized rect
-        Rng2F32 rect = camera->rect;
-        Vec2F32 rect_center = center_2f32(camera->rect);
-        Vec2F32 shift = {-rect_center.x, -rect_center.y};
-        Vec2F32 shift_inv = rect_center;
-        rect = shift_2f32(rect, shift);
-
         F32 zoom_step = mix_1f32(camera->min_zoom_step, camera->max_zoom_step, camera->zoom_t);
         F32 scale_unit = 1.f+zoom_step;
         F32 scale = pow_f32(scale_unit, (F32)delta.y);
-        rect.x0 *= scale;
-        rect.x1 *= scale;
-        rect.y0 *= scale;
-        rect.y1 *= scale;
-        rect = shift_2f32(rect, shift_inv);
 
-        // anchor mouse pos in world
-        Mat4x4F32 proj_mat_after = make_orthographic_vulkan_4x4f32(rect.x0, rect.x1, rect.y1, rect.y0, camera->zn, camera->zf);
-        Mat4x4F32 proj_mat_inv_after = inverse_4x4f32(proj_mat_after);
+        F32 target_height = Clamp(ik_state->window_dim.y*0.1f, camera->target_height * scale, ik_state->window_dim.y*30);
+        F32 target_width = target_height * (ik_state->window_ratio);
+        Rng2F32 target_rect = ik_rect_from_center_size(camera->center, v2f32(target_width, target_height));
+
+        // Anchor mouse pos in world
+        Mat4x4F32 proj_mat_after = make_orthographic_vulkan_4x4f32(target_rect.x0, target_rect.x1, target_rect.y1, target_rect.y0, camera->zn, camera->zf);
+        Mat4x4F32 proj_mat_inv_after = inverse_orthographic_4x4f32(proj_mat_after);
         Vec2F32 mouse_in_world_after = ik_mouse_in_world(proj_mat_inv_after);
         Vec2F32 world_delta = sub_2f32(ik_state->mouse_in_world, mouse_in_world_after);
-        rect = shift_2f32(rect, world_delta);
-        camera->target_rect = rect;
+        Assert(isfinite(world_delta.x) && isfinite(world_delta.y));
+
+        camera->target_center = add_2f32(camera->center, world_delta);
+        camera->target_height = target_height;
         camera->anim_rate = ik_state->animation.fast_rate;
 
         taken = 1;
@@ -1352,41 +1348,51 @@ ik_frame(void)
       Vec2F32 delta = sub_2f32(drag.drag_start_mouse, ik_state->mouse);
       delta.x *= ik_state->screen_to_world_factor.x;
       delta.y *= ik_state->screen_to_world_factor.y;
-      Rng2F32 rect = shift_2f32(drag.drag_start_rect, delta);
-      camera->target_rect = rect;
-      camera->rect = rect;
+      camera->target_center = camera->center = add_2f32(drag.drag_start_center, delta);
     }
     camera->is_panning = is_panning;
 
     // camera animations
+    camera->center.x += camera->anim_rate * (camera->target_center.x-camera->center.x);
+    camera->center.y += camera->anim_rate * (camera->target_center.y-camera->center.y);
+    camera->height += camera->anim_rate * (camera->target_height-camera->height);
+
     F32 ep = (ik_state->dpi/96.f)*1.1*ik_state->screen_to_world_factor.x;
-    if(abs_f32(camera->target_rect.x0-camera->rect.x0) < ep) camera->rect.x0 = camera->target_rect.x0;
-    if(abs_f32(camera->target_rect.x1-camera->rect.x1) < ep) camera->rect.x1 = camera->target_rect.x1;
-    if(abs_f32(camera->target_rect.y0-camera->rect.y0) < ep) camera->rect.y0 = camera->target_rect.y0;
-    if(abs_f32(camera->target_rect.y1-camera->rect.y1) < ep) camera->rect.y1 = camera->target_rect.y1;
-    camera->rect.x0 += camera->anim_rate * (camera->target_rect.x0-camera->rect.x0);
-    camera->rect.x1 += camera->anim_rate * (camera->target_rect.x1-camera->rect.x1);
-    camera->rect.y0 += camera->anim_rate * (camera->target_rect.y0-camera->rect.y0);
-    camera->rect.y1 += camera->anim_rate * (camera->target_rect.y1-camera->rect.y1);
+    if(abs_f32(camera->target_center.x-camera->center.x) < ep) camera->center.x = camera->target_center.x;
+    if(abs_f32(camera->target_center.y-camera->center.y) < ep) camera->center.y = camera->target_center.y;
+    if(abs_f32(camera->target_height-camera->height) < ep) camera->height = camera->target_height;
 
     camera->zoom_t += ik_state->animation.slow_rate * ((F32)is_zooming-camera->zoom_t);
-    if(abs_f32(camera->zoom_t-(F32)is_zooming) < 0.01) camera->zoom_t = (F32)is_zooming;
+    if(abs_f32(camera->zoom_t-(F32)is_zooming) < 0.02) camera->zoom_t = (F32)is_zooming;
 
     B32 camera_is_animating = 0;
-    camera_is_animating = (camera_is_animating || abs_f32(camera->rect.x0 - camera->target_rect.x0) > 0.01);
-    camera_is_animating = (camera_is_animating || abs_f32(camera->rect.y0 - camera->target_rect.y0) > 0.01);
-    camera_is_animating = (camera_is_animating || abs_f32(camera->rect.x1 - camera->target_rect.x1) > 0.01);
-    camera_is_animating = (camera_is_animating || abs_f32(camera->rect.y1 - camera->target_rect.y1) > 0.01);
+    camera_is_animating = (camera_is_animating || abs_f32(camera->target_center.x - camera->center.x) >= ep);
+    camera_is_animating = (camera_is_animating || abs_f32(camera->target_center.y - camera->center.y) >= ep);
+    camera_is_animating = (camera_is_animating || abs_f32(camera->target_height - camera->height) >= ep);
     ik_state->is_animating = ik_state->is_animating || camera_is_animating;
+  }
+
+  // Build camera rect
+  {
+    F32 ratio = ik_state->window_dim.x / ik_state->window_dim.y;
+    F32 width = camera->height * ratio;
+    Vec2F32 half_size = {width*0.5f, camera->height*0.5f};
+    Vec2F32 p0 = sub_2f32(camera->center, half_size);
+    Vec2F32 p1 = add_2f32(camera->center, half_size);
+    camera->rect = (Rng2F32){.p0 = p0, .p1 = p1};
+    camera->rect_dim = dim_2f32(camera->rect);
+
+    F32 viewport_ratio = camera->rect_dim.x/camera->rect_dim.y;
+    Assert(abs_f32(viewport_ratio - ik_state->window_ratio) < 0.01f);
   }
 
   // NOTE(k): since we are not using view_mat, it's a indentity matrix, so proj_mat == proj_view_mat
   ik_state->proj_mat = make_orthographic_vulkan_4x4f32(camera->rect.x0, camera->rect.x1, camera->rect.y1, camera->rect.y0, camera->zn, camera->zf);
-  ik_state->proj_mat_inv = inverse_4x4f32(ik_state->proj_mat);
+  ik_state->proj_mat_inv = inverse_orthographic_4x4f32(ik_state->proj_mat);
   ik_state->mouse_in_world = ik_mouse_in_world(ik_state->proj_mat_inv);
-  Vec2F32 camera_rect_dim = dim_2f32(camera->rect);
-  ik_state->screen_to_world_factor = (Vec2F32){camera_rect_dim.x/ik_state->window_dim.x, camera_rect_dim.y/ik_state->window_dim.y};
-  ik_state->world_to_screen_factor = (Vec2F32){ik_state->window_dim.x/camera_rect_dim.x, ik_state->window_dim.y/camera_rect_dim.y};
+  ik_state->screen_to_world_factor = (Vec2F32){camera->rect_dim.x/ik_state->window_dim.x, camera->rect_dim.y/ik_state->window_dim.y};
+  Assert(isfinite(ik_state->screen_to_world_factor.x) && isfinite(ik_state->screen_to_world_factor.y));
+  ik_state->world_to_screen_factor = (Vec2F32){ik_state->window_dim.x/camera->rect_dim.x, ik_state->window_dim.y/camera->rect_dim.y};
   ik_state->mouse_delta_in_world.x = ik_state->mouse_delta.x*ik_state->screen_to_world_factor.x;
   ik_state->mouse_delta_in_world.y = ik_state->mouse_delta.y*ik_state->screen_to_world_factor.y;
 
@@ -1404,13 +1410,8 @@ ik_frame(void)
   {
     if(ik_state->window_dim.x != 0 && ik_state->window_dim.y != 0)
     {
-      Vec2F32 camera_dim = dim_2f32(camera->target_rect);
-      F32 area = camera_dim.x*camera_dim.y;
-      F32 ratio = ik_state->window_dim.x/ik_state->window_dim.y;
-      F32 y = sqrt_f32(area/ratio);
-      F32 x = ratio*y;
-      camera->target_rect.y1 = camera->target_rect.y0 + y;
-      camera->target_rect.x1 = camera->target_rect.x0 + x;
+      F32 next_height = ik_state->window_dim.y * (camera->target_height/ik_state->last_window_dim.y);
+      camera->target_height = next_height;
     }
   }
 
@@ -1493,7 +1494,7 @@ ik_frame(void)
         if(box->flags&IK_BoxFlag_FitViewport)
         {
           box->position = camera->rect.p0;
-          box->rect_size = dim_2f32(camera->rect);
+          box->rect_size = camera->rect_dim;
           box->ratio = box->rect_size.x/box->rect_size.y;
         }
 
@@ -1586,13 +1587,8 @@ ik_frame(void)
 
         if(box->flags&IK_BoxFlag_DoubleClickToCenter && box->sig.f&IK_SignalFlag_DoubleClicked)
         {
-          Vec2F32 viewport_center = center_2f32(frame->camera.target_rect);
-          Vec2F32 box_center = center_2f32(rect);
-          Vec2F32 delta = sub_2f32(box_center, viewport_center);
           ik_kill_action();
-
-          frame->camera.target_rect.p0 = add_2f32(frame->camera.target_rect.p0, delta);
-          frame->camera.target_rect.p1 = add_2f32(frame->camera.target_rect.p1, delta);
+          frame->camera.target_center = center_2f32(rect);
           frame->camera.anim_rate = ik_state->animation.slug_rate;
         }
 
@@ -1790,8 +1786,7 @@ ik_frame(void)
         F32 step_world = step_px * ik_state->screen_to_world_factor.y;
 
         camera->anim_rate = ik_state->animation.fast_rate;
-        camera->target_rect.y0 += step_world;
-        camera->target_rect.y1 += step_world;
+        camera->target_center.y += step_world;
         taken = 1;
       }
 
@@ -2241,7 +2236,7 @@ ik_frame(void)
     //- world space drawing
 
     // unpack camera settings
-    Vec2F32 viewport = dim_2f32(camera->rect);
+    Vec2F32 viewport = camera->rect_dim;
     Mat3x3F32 xform2d = make_translate_3x3f32(negate_2f32(camera->rect.p0));
 
     dr_push_viewport(viewport);
@@ -2426,11 +2421,11 @@ ik_frame(void)
     dr_pop_xform2d();
 
     /////////////////////////////////
-    //- screen space drawing (overlay)
+    //- Screen space drawing (overlay)
 
     IK_ToolKind tool = ik_tool();
 
-    // draw tool indicator
+    // Draw tool indicator
     if(tool == IK_ToolKind_Draw)
     {
       Vec4F32 stroke_color = ik_top_stroke_color();
@@ -2438,7 +2433,7 @@ ik_frame(void)
       Vec4F32 outline_color = linear_from_srgba(rgba_from_u32(0xF6FB05FF));
 
       Rng2F32 rect = {.p0 = ik_state->mouse, .p1 = ik_state->mouse};
-      F32 stroke_size_px = (ik_top_stroke_size()*ik_state->screen_to_world_factor.x)*0.5;
+      F32 stroke_size_px = (ik_top_stroke_size()/ik_state->screen_to_world_factor.x)*0.5;
 
       rect = pad_2f32(rect, stroke_size_px);
       dr_rect(rect, stroke_color, stroke_size_px+2.0, 0, 1.f);
@@ -3259,9 +3254,11 @@ ik_frame_alloc()
   frame->save_path = push_str8_copy_static(save_path, frame->_save_path);
   frame->cfg = ik_cfg_default();
 
-  // camera
-  frame->camera.rect = ik_state->window_rect;
-  frame->camera.target_rect = frame->camera.rect;
+  // Default camera settings
+  frame->camera.center = center_2f32(ik_state->window_rect);
+  frame->camera.target_center = frame->camera.center;
+  frame->camera.height = ik_state->window_dim.y;
+  frame->camera.target_height = frame->camera.height;
   frame->camera.zn = -0.1;
   frame->camera.zf = 1000000.0;
   frame->camera.anim_rate = ik_state->animation.fast_rate;
@@ -4267,16 +4264,16 @@ IK_BOX_UPDATE(stroke)
 IK_BOX_DRAW(stroke)
 {
   ProfBeginFunction();
-#if 0
+#if 1
   F32 base_stroke_size = box->stroke_size;
-  F32 min_visiable_stroke_size = (4*ik_state->dpi/96.f) * ik_state->world_to_screen_ratio.x;
+  F32 min_visiable_stroke_size = (4*ik_state->dpi/96.f) * ik_state->screen_to_world_factor.x;
 
   IK_Point *p0 = box->first_point;
   IK_Point *p1 = p0 ? p0->next : 0;
   IK_Point *p2 = p1 ? p1->next : 0;
 
   Vec4F32 stroke_color = linear_from_srgba(box->stroke_color);
-  F32 edge_softness = 1.f * ik_state->world_to_screen_ratio.x;
+  F32 edge_softness = 1.f * ik_state->screen_to_world_factor.x;
 
   F32 last_scale = 1.0;
   F32 last_point_drawn = 0;
@@ -4303,7 +4300,7 @@ IK_BOX_DRAW(stroke)
       Vec2F32 p2 = m2;
 
       // decide step size
-      F32 dist_px = length_2f32(sub_2f32(p0,p2))/ik_state->world_to_screen_ratio.x;
+      F32 dist_px = length_2f32(sub_2f32(p0,p2))/ik_state->screen_to_world_factor.x;
       U64 steps = floor_f32(dist_px/4.0);
       steps = Clamp(1, steps, 20);
 
@@ -4521,7 +4518,8 @@ IK_BOX_UPDATE(arrow)
     Vec2F32 bounds_dim = dim_2f32(bounds);
     box->position = bounds.p0;
     box->rect_size = bounds_dim;
-    AssertAlways(bounds_dim.y != 0);
+    // NOTE(@k): will happen when we pressed but not moved
+    // AssertAlways(bounds_dim.y != 0);
     box->ratio = bounds_dim.x/bounds_dim.y;
   }
   ProfEnd();
@@ -5540,7 +5538,7 @@ ik_ui_stats(void)
 
   IK_Frame *frame = ik_top_frame();
   IK_Camera *camera = &frame->camera;
-  Vec2F32 viewport_dim = dim_2f32(camera->rect);
+  Vec2F32 viewport_dim = camera->rect_dim;
 
   UI_Box *container = 0;
   F32 width = ui_top_font_size()*25;
@@ -6196,8 +6194,6 @@ ik_ui_selection(void)
 
   if(box && ik_tool() == IK_ToolKind_Selection && (box->flags&IK_BoxFlag_Dragable))
   {
-    Rng2F32 camera_rect = camera->rect;
-
     /////////////////////////////////
     // world pos to screen
 
@@ -7396,29 +7392,19 @@ ik_ui_bottom_bar()
   UI_Parent(container)
   {
     F32 zoom_level = round_f32(ik_state->screen_to_world_factor.x*100);
-    // camera zoom control
+
+    // Reset Camera zoom level
     UI_Transparency(0.3)
     UI_FontSize(ui_top_font_size()*1.15f)
     UI_PrefWidth(ui_text_dim(1, 1.0))
     if(ui_clicked(ik_ui_buttonf("%d%%", (int)(zoom_level))))
     {
-      Vec2F32 p0 = frame->camera.target_rect.p0;
-
-      Rng2F32 new_rect = frame->camera.target_rect;
-      new_rect.p1.x = p0.x + ik_state->window_dim.x;
-      new_rect.p1.y = p0.y + ik_state->window_dim.y;
-
-      // move to previous center
-      Vec2F32 old_center = center_2f32(frame->camera.target_rect);
-      Vec2F32 delta = sub_2f32(old_center, center_2f32(new_rect));
-      new_rect.p0 = add_2f32(new_rect.p0, delta);
-      new_rect.p1 = add_2f32(new_rect.p1, delta);
-      frame->camera.target_rect = new_rect;
+      frame->camera.target_height = ik_state->window_dim.y;
     }
 
     ui_spacer(ui_pct(1.0, 0.0));
 
-    // frame filepath info
+    // Frame filepath info
     UI_PrefWidth(ui_text_dim(1.5, 1.0))
       UI_Flags(UI_BoxFlag_DrawBorder|UI_BoxFlag_DrawDropShadow|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawTextWeak)
       UI_CornerRadius(2.0)
@@ -8522,9 +8508,9 @@ ik_frame_to_tyml(IK_Frame *frame)
     // camera
     SE_Struct_WithTag(str8_lit("camera"))
     {
-      IK_Camera camera = frame->camera;
-      Vec4F32 rect = v4f32(camera.target_rect.x0, camera.target_rect.y0, camera.target_rect.x1, camera.target_rect.y1);
-      se_v4f32_with_tag(str8_lit("rect"), rect);
+      // IK_Camera camera = frame->camera;
+      // Vec4F32 rect = v4f32(camera.target_rect.x0, camera.target_rect.y0, camera.target_rect.x1, camera.target_rect.y1);
+      // se_v4f32_with_tag(str8_lit("rect"), rect);
     }
 
     /////////////////////////////////
@@ -8690,12 +8676,12 @@ ik_frame_from_tyml(String8 path)
   SE_Node *camera_node = se_struct_from_tag(se_node, str8_lit("camera"));
   if(camera_node)
   {
-    Vec4F32 src = se_v4f32_from_tag(camera_node, str8_lit("rect"));
-    Rng2F32 rect = {src.x, src.y, src.z, src.w};
-    Vec2F32 dim = dim_2f32(rect);
-    dim.x = dim.y * (ik_state->window_dim.x/ik_state->window_dim.y);
-    rect.x1 = rect.x0 + dim.x;
-    frame->camera.target_rect = rect;
+    // Vec4F32 src = se_v4f32_from_tag(camera_node, str8_lit("rect"));
+    // Rng2F32 rect = {src.x, src.y, src.z, src.w};
+    // Vec2F32 dim = dim_2f32(rect);
+    // dim.x = dim.y * (ik_state->window_dim.x/ik_state->window_dim.y);
+    // rect.x1 = rect.x0 + dim.x;
+    // frame->camera.target_rect = rect;
   }
 
   /////////////////////////////////
@@ -8839,8 +8825,8 @@ internal inline bool
 ik_rect_in_viewport(Rng2F32 rect)
 {
   IK_Frame *frame = ik_top_frame();
-  Rng2F32 viewport = frame->camera.rect; 
-  Vec2F32 dim = dim_2f32(viewport);
+  Rng2F32 viewport = frame->camera.rect;
+  Vec2F32 dim = frame->camera.rect_dim;
   dim.x *= ik_state->world_to_screen_factor.x;
   dim.y *= ik_state->world_to_screen_factor.y;
   return overlaps_2f32(viewport, rect) && dim.x > 1.f && dim.y > 1.f;
@@ -8914,6 +8900,17 @@ ik_dr_line_keyed(Vec2F32 a, Vec2F32 b, Vec4F32 color, F32 line_thickness, F32 ed
   {
     ret = dr_line_keyed(a,b,color,line_thickness,edge_softness,key);
   }
+  return ret;
+}
+
+// camera
+internal Rng2F32
+ik_rect_from_center_size(Vec2F32 center, Vec2F32 size)
+{
+  Rng2F32 ret;
+  Vec2F32 half_size = v2f32(size.x*0.5f, size.y*0.5f);
+  ret.p0 = sub_2f32(center, half_size);
+  ret.p1 = add_2f32(center, half_size);
   return ret;
 }
 
