@@ -1511,7 +1511,6 @@ ik_frame(void)
             IK_BoxDrag drag = {ik_rect_from_box(box), ik_state->mouse, ik_state->mouse_in_world, 0};
             ik_store_drag_struct(&drag);
             ik_state->action_slot = IK_ActionSlot_Center;
-            ik_box_action_capture(box);
           }
           else if(ik_state->action_slot == IK_ActionSlot_Center)
           {
@@ -1526,6 +1525,7 @@ ik_frame(void)
               Vec2F32 position_delta = sub_2f32(position, box->position);
               ik_box_do_translate(box, position_delta);
 
+              if(!drag.drag_started) ik_box_action_capture(box);
               drag.drag_started = 1;
               ik_store_drag_struct(&drag);
             }
@@ -2283,7 +2283,16 @@ ik_frame(void)
           // draw border
           if(box->flags & IK_BoxFlag_DrawBorder && !zero_dim)
           {
-            F32 border_thickness = 2.0 * ik_state->world_to_screen_ratio.x;
+            // smoothstep
+            F32 min_border_thickness = 1.0 * ik_state->world_to_screen_ratio.x;
+            F32 max_border_thickness = 2.5 * ik_state->world_to_screen_ratio.x;
+            F32 min_size = 400.f * ik_state->world_to_screen_ratio.x;
+            F32 max_size = 600.f * ik_state->world_to_screen_ratio.x;
+            F32 size = Max(box->rect_size.x, box->rect_size.y);
+            F32 t = (size-min_size)/(max_size-min_size);
+            t = Clamp(0.f, t, 1.f);
+
+            F32 border_thickness = mix_1f32(min_border_thickness, max_border_thickness, t);
             F32 corner_radius = 1.0 * ik_state->world_to_screen_ratio.x;
             R_Rect2DInst *inst = dr_rect_keyed(pad_2f32(dst, 0.5*border_thickness), box->border_color, corner_radius, border_thickness, border_thickness/2.0, box->key_3f32);
           }
@@ -5905,6 +5914,7 @@ ik_ui_toolbar(void)
     UI_Row
     UI_Padding(ui_pct(1.0, 0.0))
     UI_Flags(UI_BoxFlag_DrawBorder|UI_BoxFlag_DrawDropShadow|UI_BoxFlag_DrawBackground)
+    UI_CornerRadius(2.0f)
     UI_PrefWidth(ui_px(cell_width*IK_ToolKind_COUNT, 1.0))
     UI_PrefHeight(ui_px(cell_width, 1.0))
     UI_ChildLayoutAxis(Axis2_X)
@@ -6120,12 +6130,12 @@ ik_ui_selection(void)
                 .drag_start_rect = ik_rect_from_box(box),
                 .drag_start_mouse = ik_state->mouse,
                 .drag_start_mouse_in_world = ik_state->mouse_in_world,
+                .drag_started = 0,
               };
               ui_store_drag_struct(&drag);
               ik_state->hot_box_key = box->key;
               ik_state->action_slot = IK_ActionSlot_TopLeft;
               ik_state->active_box_key[IK_MouseButtonKind_Left] = box->key;
-              ik_box_action_capture(box);
             }
             else
             {
@@ -6153,9 +6163,16 @@ ik_ui_selection(void)
 
               Vec2F32 box_rect_dim = box->rect_size;
               Vec2F32 scale_delta = v2f32(new_rect_size.x/box_rect_dim.x, new_rect_size.y/box_rect_dim.y);
+              F32 px_changed = abs_f32(new_rect_size.x-box_rect_dim.x) + abs_f32(new_rect_size.y-box_rect_dim.y);
 
-              if(scale_delta.x > 0 && scale_delta.y > 0)
+              if(scale_delta.x > 0 && scale_delta.y > 0 && px_changed > 1.0)
               {
+                if(!drag.drag_started)
+                {
+                  ik_box_action_capture(box);
+                  drag.drag_started = 1;
+                  ik_store_drag_struct(&drag);
+                }
                 Vec2F32 pivot = {box->position.x+box->rect_size.x, box->position.y+box->rect_size.y};
                 ik_box_do_scale(box, scale_delta, pivot);
               }
@@ -6239,12 +6256,12 @@ ik_ui_selection(void)
                 .drag_start_rect = ik_rect_from_box(box),
                 .drag_start_mouse = ik_state->mouse,
                 .drag_start_mouse_in_world = ik_state->mouse_in_world,
+                .drag_started = 0,
               };
               ui_store_drag_struct(&drag);
               ik_state->hot_box_key = box->key;
               ik_state->action_slot = IK_ActionSlot_DownRight;
               ik_state->active_box_key[IK_MouseButtonKind_Left] = box->key;
-              ik_box_action_capture(box);
             }
             else
             {
@@ -6273,9 +6290,16 @@ ik_ui_selection(void)
 
               Vec2F32 box_rect_dim = box->rect_size;
               Vec2F32 scale_delta = v2f32(new_rect_size.x/box_rect_dim.x, new_rect_size.y/box_rect_dim.y);
+              F32 px_changed = abs_f32(new_rect_size.x-box_rect_dim.x) + abs_f32(new_rect_size.y-box_rect_dim.y);
 
-              if(scale_delta.x > 0 && scale_delta.y > 0)
+              if(scale_delta.x > 0 && scale_delta.y > 0 && px_changed > 1.0)
               {
+                if(!drag.drag_started)
+                {
+                  ik_box_action_capture(box);
+                  drag.drag_started = 1;
+                  ik_store_drag_struct(&drag);
+                }
                 ik_box_do_scale(box, scale_delta, box->position);
               }
             }
@@ -6468,6 +6492,7 @@ ik_ui_inspector(void)
 
           UI_PrefWidth(ui_px(ui_top_font_size()*8, 1.0))
           UI_TextAlignment(UI_TextAlign_Center)
+          UI_CornerRadius(2.f)
           if(ui_committed(ui_line_edit(&ik_state->edit_buffer.cursor, &ik_state->edit_buffer.mark, ik_state->edit_buffer.buffer, ArrayCount(ik_state->edit_buffer.buffer), &ik_state->edit_buffer.string_size, b->name, str8_lit("name/tag"))))
           {
             U64 size = Min(ik_state->edit_buffer.string_size, ArrayCount(b->_name));
