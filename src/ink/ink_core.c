@@ -1554,8 +1554,8 @@ ik_frame(void)
 
         if(!(box->flags&IK_BoxFlag_FixedRatio))
         {
-          AssertAlways(box->rect_size.y != 0);
-          box->ratio = box->rect_size.x/box->rect_size.y;
+          F32 ratio = 0;
+          if(box->rect_size.x != 0 && box->rect_size.y != 0) box->ratio = box->rect_size.x/box->rect_size.y;
         }
 
         ////////////////////////////////
@@ -6041,24 +6041,33 @@ internal UI_BOX_CUSTOM_DRAW(ui_line_draw)
   dr_line(draw_data->a, draw_data->b, draw_data->stroke_color, draw_data->stroke_size, 1.0);
 }
 
-typedef struct UI_SelectionBorderDrawData UI_SelectionBorderDrawData;
-struct UI_SelectionBorderDrawData
+typedef struct UI_SelectionDrawData UI_SelectionDrawData;
+struct UI_SelectionDrawData
 {
-  F32 hover_t;
+  F32 hot_t;
+  Rng2F32 rect;
+  Vec3F32 overlay_key;
 };
-internal UI_BOX_CUSTOM_DRAW(ui_selection_border_draw)
+internal UI_BOX_CUSTOM_DRAW(ui_selection_draw)
 {
-  UI_SelectionBorderDrawData *draw_data = (UI_SelectionBorderDrawData*)user_data;
-  F32 t = draw_data->hover_t;
-  F32 border_softness = 1.f;
-  F32 border_thickness = mix_1f32(2.f, 1.0f, t);
-  R_Rect2DInst *inst = dr_rect(pad_2f32(box->rect, 0.f), box->palette->colors[UI_ColorCode_Border], 0, border_thickness, border_softness);
-  MemoryCopyArray(inst->corner_radii, box->corner_radii);
+  UI_SelectionDrawData *draw_data = (UI_SelectionDrawData*)user_data;
+  // Draw border
+  {
+    F32 t = draw_data->hot_t;
+    F32 border_softness = 1.f;
+    F32 border_thickness = mix_1f32(2.f, 1.0f, t);
+    R_Rect2DInst *inst = dr_rect(pad_2f32(box->rect, 0.f), box->palette->colors[UI_ColorCode_Border], 0, border_thickness, border_softness);
+    MemoryCopyArray(inst->corner_radii, box->corner_radii);
 
-  Rng2F32 drop_shadow_rect = shift_2f32(pad_2f32(box->rect, 8), v2f32(4, 4));
-  Vec4F32 drop_shadow_color = ik_rgba_from_theme_color(IK_ThemeColor_DropShadow);
-  drop_shadow_color.w = mix_1f32(drop_shadow_color.w, 0.1f, t);
-  dr_rect(drop_shadow_rect, drop_shadow_color, 0.8f, 0, 8.f);
+    Rng2F32 drop_shadow_rect = shift_2f32(pad_2f32(box->rect, 8), v2f32(4, 4));
+    Vec4F32 drop_shadow_color = ik_rgba_from_theme_color(IK_ThemeColor_DropShadow);
+    drop_shadow_color.w = mix_1f32(drop_shadow_color.w, 0.1f, t);
+    dr_rect(drop_shadow_rect, drop_shadow_color, 0.8f, 0, 8.f);
+  }
+
+  // Draw a keyed-overlay
+  // FIXME(k): won't work well, since there is delay
+  // dr_rect_keyed(pad_2f32(draw_data->rect, 4.0), v4f32(0,0,0,0), 0,0,0, draw_data->overlay_key);
 }
 
 internal void
@@ -6088,7 +6097,7 @@ ik_ui_selection(void)
     p1.y = (p1.y*0.5+0.5) * ik_state->window_dim.y + 1;
 
     Rng2F32 rect = r2f32p(p0.x, p0.y, p1.x, p1.y);
-    rect = pad_2f32(rect, mix_1f32(8.f, 1.5f, box->hot_t));
+    rect = pad_2f32(rect, mix_1f32(8.f, 4.5f, box->hot_t));
     Vec2F32 center = center_2f32(rect);
     // F32 padding_px = ui_top_font_size()*0.5;
     F32 padding_px = 0.0;
@@ -6109,6 +6118,18 @@ ik_ui_selection(void)
     Vec4F32 hot_clr = ik_rgba_from_theme_color(IK_ThemeColor_BaseBackground);
     Vec4F32 border_clr = mix_4f32(base_clr, hot_clr, 0.8+Max(active_t, hot_t)*0.5);
     border_clr.w = 1.0;
+
+    UI_SelectionDrawData *draw_data = push_array(ui_build_arena(), UI_SelectionDrawData, 1);
+    draw_data->hot_t = hot_t;
+    draw_data->rect = rect;
+    draw_data->overlay_key = box->key_3f32;
+    ui_box_equip_custom_draw(container, ui_selection_draw, draw_data);
+
+    // FIXME: don't work either
+    // if(contains_2f32(pad_2f32(rect, 1.0), ik_state->mouse))
+    // {
+    //   ik_state->pixel_hot_key = box->key;
+    // }
 
     UI_Parent(container)
       UI_Palette(ui_build_palette(ui_top_palette(), .border = border_clr, .background = ik_rgba_from_theme_color(IK_ThemeColor_Breakpoint)))
@@ -6206,7 +6227,7 @@ ik_ui_selection(void)
               Vec2F32 scale_delta = v2f32(new_rect_size.x/box_rect_dim.x, new_rect_size.y/box_rect_dim.y);
               F32 px_changed = abs_f32(new_rect_size.x-box_rect_dim.x) + abs_f32(new_rect_size.y-box_rect_dim.y);
 
-              if(drag.drag_started || (scale_delta.x > 0 && scale_delta.y > 0 && px_changed > 1.0))
+              if((drag.drag_started || px_changed > 1.0) && (scale_delta.x > 0 && scale_delta.y > 0))
               {
                 if(!drag.drag_started)
                 {
@@ -6327,7 +6348,7 @@ ik_ui_selection(void)
               Vec2F32 scale_delta = v2f32(new_rect_size.x/box_rect_dim.x, new_rect_size.y/box_rect_dim.y);
               F32 px_changed = abs_f32(new_rect_size.x-box_rect_dim.x) + abs_f32(new_rect_size.y-box_rect_dim.y);
 
-              if(drag.drag_started || (scale_delta.x > 0 && scale_delta.y > 0 && px_changed > 1.0))
+              if((drag.drag_started || px_changed > 1.0) && (scale_delta.x > 0 && scale_delta.y > 0))
               {
                 if(!drag.drag_started)
                 {
@@ -6345,21 +6366,6 @@ ik_ui_selection(void)
           }
         }
       }
-    }
-
-    /////////////////////////////////
-    //~ Borders
-
-    Vec4F32 border_color = ik_rgba_from_theme_color(IK_ThemeColor_BaseBorder);
-    
-    UI_Rect(rect)
-      UI_Palette(ui_build_palette(ui_top_palette(), .border = border_color))
-      UI_CornerRadius(4.f)
-    {
-      UI_Box *b = ui_build_box_from_stringf(0, "###border");
-      UI_SelectionBorderDrawData *draw_data = push_array(ui_build_arena(), UI_SelectionBorderDrawData, 1);
-      draw_data->hover_t = box->hot_t;
-      ui_box_equip_custom_draw(b, ui_selection_border_draw, draw_data);
     }
 
     /////////////////////////////////
