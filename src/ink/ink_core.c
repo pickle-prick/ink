@@ -1934,7 +1934,6 @@ ik_frame(void)
                      IK_BoxFlag_DragToScaleRectSize);
       box->position = ik_state->mouse_in_world;
       box->rect_size = v2f32(ik_state->world_to_screen_ratio.x, ik_state->world_to_screen_ratio.y);
-      box->last_rect_size = box->rect_size;
       box->font_size = font_size_in_world;
       box->text_align = IK_TextAlign_HCenter|IK_TextAlign_VCenter;
       box->disabled_t = 1.0;
@@ -2070,30 +2069,6 @@ ik_frame(void)
 
     /////////////////////////////////
     //~ Build End
-
-    /////////////////////////////////
-    //- update last_rect_size & commit drag offset
-
-    for(U64 i = 0; i < ArrayCount(roots); i++)
-    {
-      IK_Box *root = roots[i];
-      for(IK_Box *box = root, *next = 0; box != 0; box = next)
-      {
-        next = box->list_prev;
-        if(box->flags&IK_BoxFlag_Deleted) continue;
-        B32 is_active = ik_key_match(ik_state->active_box_key[IK_MouseButtonKind_Left], box->key);
-
-        //- top left dragged? -> offset position by rect size delta
-        B32 top_left_dragging = is_active && ik_state->action_slot == IK_ActionSlot_TopLeft;
-        if(top_left_dragging)
-        {
-          Vec2F32 dim_delta = sub_2f32(box->last_rect_size, box->rect_size);
-          ik_box_do_translate(box, dim_delta);
-        }
-
-        box->last_rect_size = box->rect_size;
-      }
-    }
 
     /////////////////////////////////
     //- hover cursor
@@ -3144,6 +3119,7 @@ ik_frame_alloc()
                                            IK_BoxFlag_FitViewport|
                                            IK_BoxFlag_DrawKeyOverlay|
                                            IK_BoxFlag_Orphan|
+                                           IK_BoxFlag_Transient|
                                            IK_BoxFlag_Transparent,
                                            "blank");
   frame->select = ik_build_box_from_stringf(IK_BoxFlag_MouseClickable|
@@ -3153,6 +3129,7 @@ ik_frame_alloc()
                                             IK_BoxFlag_DrawBackground|
                                             IK_BoxFlag_DrawDropShadow|
                                             IK_BoxFlag_DragToPosition|
+                                            IK_BoxFlag_Transient|
                                             IK_BoxFlag_Transparent|
                                             IK_BoxFlag_FixedRatio|
                                             IK_BoxFlag_FitChildren,
@@ -3320,7 +3297,6 @@ ik_box_clone(IK_Box *src)
     ret->position          = src->position;
     ret->rotation          = src->rotation;
     ret->rect_size         = src->rect_size;
-    ret->last_rect_size    = src->last_rect_size;
     ret->background_color  = src->background_color;
     ret->text_color        = src->text_color;
     ret->border_color      = src->border_color;
@@ -3990,7 +3966,6 @@ ik_text(String8 string, Vec2F32 pos)
                 IK_BoxFlag_DragToPosition;
   box->position = pos;
   box->rect_size = v2f32(font_size_in_world*3, font_size_in_world);
-  box->last_rect_size = box->rect_size;
   box->hover_cursor = OS_Cursor_UpDownLeftRight;
   box->font_size = font_size_in_world;
   box->ratio = 0;
@@ -4012,7 +3987,6 @@ ik_image(IK_BoxFlags flags, Vec2F32 pos, Vec2F32 rect_size, IK_Image *image)
   box->flags = flags|IK_BoxFlag_DrawImage|IK_BoxFlag_MouseClickable|IK_BoxFlag_ClickToFocus|IK_BoxFlag_FixedRatio|IK_BoxFlag_DragToPosition|IK_BoxFlag_DragToScaleRectSize|IK_BoxFlag_DoubleClickToCenter;
   box->position = pos;
   box->rect_size = rect_size;
-  box->last_rect_size = rect_size;
   box->hover_cursor = OS_Cursor_UpDownLeftRight;
   box->image = image;
   image->rc++;
@@ -5911,7 +5885,8 @@ ik_ui_selection(void)
 
               if(scale_delta.x > 0 && scale_delta.y > 0)
               {
-                ik_box_do_scale(box, scale_delta, box->position);
+                Vec2F32 pivot = {box->position.x+box->rect_size.x, box->position.y+box->rect_size.y};
+                ik_box_do_scale(box, scale_delta, pivot);
               }
             }
           }
@@ -7981,7 +7956,13 @@ ik_frame_to_tyml(IK_Frame *frame)
     {
       for(IK_Box *box = frame->box_list.first; box != 0; box = box->list_next)
       {
-        IK_Box *group = box->parent;
+        // NOTE(k): current only select and root box has IK_BoxFlag_Transient flags, and we won't pass them here
+        AssertAlways(!(box->flags&IK_BoxFlag_Transient));
+        IK_Box *parent = 0;
+        if(parent && !(parent->flags&IK_BoxFlag_Transient))
+        {
+          parent = box->parent;
+        }
 
         if(box->flags&IK_BoxFlag_Deleted) continue;
 
@@ -7991,7 +7972,7 @@ ik_frame_to_tyml(IK_Frame *frame)
           // Basic
 
           se_v2u64_with_tag(str8_lit("key"), v2u64(box->key.u64[0], box->key.u64[1]));
-          if(group) se_v2u64_with_tag(str8_lit("group"), v2u64(group->key.u64[0], group->key.u64[1]));
+          if(parent) se_v2u64_with_tag(str8_lit("parent"), v2u64(parent->key.u64[0], parent->key.u64[1]));
           se_str_with_tag(str8_lit("name"), box->name);
           se_u64_with_tag(str8_lit("flags"), box->flags);
           se_v2f32_with_tag(str8_lit("position"), box->position);
@@ -8165,24 +8146,26 @@ ik_frame_from_tyml(String8 path)
   if(first_box_node && first_box_node->parent)
   {
     // NOTE(k): since we need to add group, and group box is always added after the group children, so we reverse the loading order
+    // FIXME(@Bug): this won't work at all, we effectly reverse the order when loading from tyml, so we will be fucked next we serialize, maybe just use two passes
     for(SE_Node *n = first_box_node->parent->last; n != 0; n = n->prev)
     {
       // basic
       Vec2U64 key_src = se_v2u64_from_tag(n, str8_lit("key"));
-      Vec2U64 group_key_src = se_v2u64_from_tag(n, str8_lit("group"));
+      Vec2U64 parent_key_src = se_v2u64_from_tag(n, str8_lit("parent"));
       IK_Key key = ik_key_make(key_src.x, key_src.y);
-      IK_Key group_key = ik_key_make(group_key_src.x, group_key_src.y);
-      IK_Box *group = ik_box_from_key(group_key);
+      IK_Key parent_key = ik_key_make(parent_key_src.x, parent_key_src.y);
+      AssertAlways(ik_key_match(ik_key_zero(), parent_key));
+      IK_Box *parent = ik_box_from_key(parent_key);
       U64 flags = se_u64_from_tag(n, str8_lit("flags"));
       Assert(!(flags&IK_BoxFlag_Deleted));
 
       // NOTE(k): push front
       IK_Box *box = ik_build_box_from_key_(flags, key, 0);
 
-      if(group)
+      if(parent)
       {
-        DLLPushFront(group->first, group->last, box);
-        group->children_count++;
+        DLLPushFront(parent->first, parent->last, box);
+        parent->children_count++;
       }
 
       String8 name = se_str_from_tag(n, str8_lit("name"));

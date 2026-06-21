@@ -428,6 +428,7 @@ typedef U64 IK_BoxFlags;
 # define IK_BoxFlag_Transparent           (IK_BoxFlags)(1ull<<36) // fallthrough operations (translate, scale, deletion, selection, paste)
 # define IK_BoxFlag_DrawTag               (IK_BoxFlags)(1ull<<37) // FIXME: oginize the order later
 # define IK_BoxFlag_Deleted               (IK_BoxFlags)(1ull<<38) // FIXME: oginize the order later
+# define IK_BoxFlag_Transient             (IK_BoxFlags)(1ull<<39) // FIXME: oginize the order later
 
 // compound flags
 #define IK_BoxFlag_Dragable (IK_BoxFlag_DragToScaleFontSize|IK_BoxFlag_DragToScalePoint|IK_BoxFlag_DragToScaleRectSize|IK_BoxFlag_DragToPosition|IK_BoxFlag_DragToScaleStrokeSize|IK_BoxFlag_DragToScaleStrokeSize)
@@ -486,7 +487,6 @@ struct IK_Box
   Vec2F32 position; // top left
   F32 rotation; // around center, turns
   Vec2F32 rect_size;
-  Vec2F32 last_rect_size;
   Vec4F32 background_color;
   Vec4F32 text_color;
   Vec4F32 border_color;
