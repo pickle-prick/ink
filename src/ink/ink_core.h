@@ -518,7 +518,7 @@ struct IK_Box
 
   // Per-build equipment
   String8 name;
-  U8 _name[512];
+  U8 _name[256];
   IK_BoxFlags flags;
   Vec2F32 position; // top left
   F32 rotation; // around center, turns

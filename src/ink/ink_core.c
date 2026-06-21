@@ -2387,17 +2387,20 @@ ik_frame(void)
     //- screen space drawing (overlay)
 
     IK_ToolKind tool = ik_tool();
+
     // draw tool indicator
     if(tool == IK_ToolKind_Draw)
     {
-      U32 src = 0xF6FB05FF;
-      Vec4F32 clr = linear_from_srgba(rgba_from_u32(src));
-      clr.w = 0.8;
+      Vec4F32 stroke_color = ik_top_stroke_color();
+      stroke_color.w = 0.25;
+      Vec4F32 outline_color = linear_from_srgba(rgba_from_u32(0xF6FB05FF));
+
       Rng2F32 rect = {.p0 = ik_state->mouse, .p1 = ik_state->mouse};
       F32 stroke_size_px = (ik_top_stroke_size()/ik_state->world_to_screen_ratio.x)*0.5;
+
       rect = pad_2f32(rect, stroke_size_px);
-      dr_rect(pad_2f32(rect, 2.0), v4f32(1,0,0,0.8), stroke_size_px+2.0, 0, 0.f);
-      dr_rect(rect, clr, stroke_size_px, 0, 1.f);
+      dr_rect(rect, stroke_color, stroke_size_px+2.0, 0, 1.f);
+      dr_rect(pad_2f32(rect,1.0f), outline_color, stroke_size_px+2.0, 1.f, 1.f);
     }
     dr_pop_viewport();
   }
