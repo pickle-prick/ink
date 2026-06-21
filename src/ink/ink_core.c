@@ -1204,6 +1204,44 @@ ik_frame(void)
   ik_ui_g_ctx_menu();
   ik_ui_version();
 
+  // check if mouse clicked outside of ui
+  for(UI_EventNode *n = ui_events.first, *next = 0; n != 0; n = next)
+  {
+    next = n->next;
+    UI_Event *evt = &n->v;
+
+    UI_MouseButtonKind evt_mouse_button_kind = 
+      evt->key == OS_Key_LeftMouseButton   ? UI_MouseButtonKind_Left   :
+      evt->key == OS_Key_RightMouseButton  ? UI_MouseButtonKind_Right  :
+      evt->key == OS_Key_MiddleMouseButton ? UI_MouseButtonKind_Middle :
+      UI_MouseButtonKind_Left;
+    B32 evt_key_is_mouse =
+      evt->key == OS_Key_LeftMouseButton  || 
+      evt->key == OS_Key_RightMouseButton ||
+      evt->key == OS_Key_MiddleMouseButton;
+
+    if(evt->kind == UI_EventKind_Press && evt_key_is_mouse)
+    {
+      // ui_state->active_box_key[evt_mouse_button_kind] = ui_key_zero();
+
+      UI_Box *box = ui_root_from_state(ui_state);
+      while(!ui_box_is_nil(box))
+      {
+        UI_BoxRec rec = ui_box_rec_df_post(box, &ui_nil_box);
+
+        if(box->flags & UI_BoxFlag_DefaultFocusNav)
+        {
+          box->default_nav_focus_next_hot_key = ui_key_zero();
+          box->default_nav_focus_next_active_key = ui_key_zero();
+        }
+
+        box = rec.next;
+      }
+
+      break;
+    }
+  }
+
   ////////////////////////////////
   //~ Copy events
   //  NOTE(k): we are using the same ui_events as ui used, so any event eaten can be detected
@@ -2245,8 +2283,9 @@ ik_frame(void)
           // draw border
           if(box->flags & IK_BoxFlag_DrawBorder && !zero_dim)
           {
-            F32 border_thickness = 1.0 * ik_state->world_to_screen_ratio.x;
-            R_Rect2DInst *inst = dr_rect_keyed(pad_2f32(dst, 2*border_thickness), box->border_color, 0, border_thickness, border_thickness/2.0, box->key_3f32);
+            F32 border_thickness = 2.0 * ik_state->world_to_screen_ratio.x;
+            F32 corner_radius = 1.0 * ik_state->world_to_screen_ratio.x;
+            R_Rect2DInst *inst = dr_rect_keyed(pad_2f32(dst, 0.5*border_thickness), box->border_color, corner_radius, border_thickness, border_thickness/2.0, box->key_3f32);
           }
 
           if(box->flags & IK_BoxFlag_DrawHotEffects)
@@ -4342,6 +4381,7 @@ IK_BOX_UPDATE(arrow)
 
 IK_BOX_DRAW(arrow)
 {
+#if 0
   IK_Point *pa = box->first_point;
   IK_Point *pm = pa->next;
   IK_Point *pb = box->last_point;
@@ -4430,6 +4470,120 @@ IK_BOX_DRAW(arrow)
       prev = pt;
     }
   }
+#else
+  F32 stroke_size = box->stroke_size;
+  Vec4F32 stroke_clr = linear_from_srgba(box->stroke_color);
+  // Softness proportional to screen scale for anti-aliasing
+  F32 edge_softness = 1.0f * ik_state->world_to_screen_ratio.x; 
+
+  IK_Point *pa = box->first_point;
+  IK_Point *pm = pa->next;
+  IK_Point *pb = box->last_point;
+
+  Vec2F32 a = pa->position;
+  Vec2F32 m = pm->position;
+  Vec2F32 b = pb->position;
+
+  // Geometry: Calculate Control Point (C)
+  // We want the curve to pass through M (Midpoint) at t=0.5
+  // Formula: P1 = 2*M - 0.5*(P0 + P2)
+  Vec2F32 c = sub_2f32(scale_2f32(m, 2.0f), scale_2f32(add_2f32(a, b), 0.5f));
+
+  // Draw the Shaft (The Curve)
+  {
+    // Heuristic: More steps if long or curvy
+    F32 seg_len = length_2f32(sub_2f32(a, b));
+    F32 curvature = length_2f32(sub_2f32(scale_2f32(add_2f32(a, b), 0.5f), c));
+    U64 steps = (U64)((seg_len + curvature * 2.0f) / (4.0f * ik_state->world_to_screen_ratio.x));
+    steps = Clamp(10, steps, 100);
+
+    Vec2F32 prev = a;
+
+    // Draw start dot (Anchor)
+    // Rng2F32 start_dot = r2f32p(a.x - stroke_size/2, a.y - stroke_size/2, a.x + stroke_size/2, a.y + stroke_size/2);
+    // dr_rect_keyed(start_dot, stroke_clr, stroke_size, 0, edge_softness, box->key_3f32);
+
+    for(U64 i = 1; i <= steps; i++)
+    {
+      F32 t = (F32)i / (F32)steps;
+      F32 u = 1.0f - t;
+
+      // Quadratic Bezier Formula
+      Vec2F32 pt = {
+        u*u*a.x + 2*u*t*c.x + t*t*b.x,
+        u*u*a.y + 2*u*t*c.y + t*t*b.y
+      };
+
+      // Taper Logic:
+      // Only taper the very first 10% of the line for a "pen down" effect.
+      // otherwise keep it full width. Looks stronger.
+      F32 width = stroke_size;
+      if(t < 0.1f) width *= (0.5f + (t / 0.1f) * 0.5f);
+
+      // Draw Segment
+      dr_line_keyed(prev, pt, stroke_clr, width, edge_softness, box->key_3f32);
+
+      // Draw Round Joint (Kneecap)
+      Rng2F32 joint = r2f32p(pt.x - width/2, pt.y - width/2, pt.x + width/2, pt.y + width/2);
+      dr_rect_keyed(joint, stroke_clr, width, 0, edge_softness, box->key_3f32);
+
+      prev = pt;
+    }
+  }
+
+  // Draw the Arrowhead
+  {
+    // Calculate Tangent at end of curve (t=1)
+    // Derivative of Quad Bezier at t=1 is 2*(P2 - P1) => 2*(b - c)
+    // We normalize this to get the direction.
+    Vec2F32 dir = normalize_2f32(sub_2f32(b, c));
+
+    // Fallback if b == c (straight line case), calculate from a to b
+    if(length_2f32(dir) < 0.001f)
+    {
+      dir = normalize_2f32(sub_2f32(b, a));
+    }
+
+    // Geometry Settings
+    F32 arrow_len = stroke_size * 5.0f; // Length of the wings
+    F32 arrow_angle = 0.5f; // Radians (~28 degrees), sharper looks faster
+    arrow_angle = turns_from_radians_f32(arrow_angle);
+
+    // Rotate direction vector
+    F32 cos_a = cos_f32(arrow_angle);
+    F32 sin_a = sin_f32(arrow_angle);
+
+    // Left Wing Direction
+    Vec2F32 v_left = {
+      dir.x * cos_a - dir.y * sin_a,
+      dir.x * sin_a + dir.y * cos_a
+    };
+
+    // Right Wing Direction
+    Vec2F32 v_right = {
+      dir.x * cos_a + dir.y * sin_a,
+      -dir.x * sin_a + dir.y * cos_a
+    };
+
+    // Calculate Wing End Points (Going backwards from tip)
+    Vec2F32 p_left = sub_2f32(b, scale_2f32(v_left, arrow_len));
+    Vec2F32 p_right = sub_2f32(b, scale_2f32(v_right, arrow_len));
+
+    // Draw Left Wing
+    dr_line_keyed(b, p_left, stroke_clr, stroke_size, edge_softness, box->key_3f32);
+    Rng2F32 l_cap = r2f32p(p_left.x - stroke_size/2, p_left.y - stroke_size/2, p_left.x + stroke_size/2, p_left.y + stroke_size/2);
+    dr_rect_keyed(l_cap, stroke_clr, stroke_size, 0, edge_softness, box->key_3f32);
+
+    // Draw Right Wing
+    dr_line_keyed(b, p_right, stroke_clr, stroke_size, edge_softness, box->key_3f32);
+    Rng2F32 r_cap = r2f32p(p_right.x - stroke_size/2, p_right.y - stroke_size/2, p_right.x + stroke_size/2, p_right.y + stroke_size/2);
+    dr_rect_keyed(r_cap, stroke_clr, stroke_size, 0, edge_softness, box->key_3f32);
+
+    // Draw Tip Cap (To make the point rounded and flush)
+    Rng2F32 tip_cap = r2f32p(b.x - stroke_size/2, b.y - stroke_size/2, b.x + stroke_size/2, b.y + stroke_size/2);
+    dr_rect_keyed(tip_cap, stroke_clr, stroke_size, 0, edge_softness, box->key_3f32);
+  }
+#endif
 }
 
 internal IK_Box *
@@ -7021,7 +7175,7 @@ ik_ui_bottom_bar()
     F32 zoom_level = round_f32(ik_state->world_to_screen_ratio.x*100);
     // camera zoom control
     UI_Transparency(0.3)
-    UI_FontSize(ui_top_font_size()*1.35f)
+    UI_FontSize(ui_top_font_size()*1.15f)
     UI_PrefWidth(ui_text_dim(1, 1.0))
     if(ui_clicked(ik_ui_buttonf("%d%%", (int)(zoom_level))))
     {
