@@ -75,6 +75,15 @@ entry_point(CmdLine *cmd_line)
   //   scratch_end(scratch);
   // }
 
+#if OS_WINDOWS
+  if(cmd_line_has_flag(cmd_line, s("cli")))
+  {
+    AttachConsole(ATTACH_PARENT_PROCESS);
+    freopen("CONOUT$", "wt", stdout);
+    freopen("CONOUT$", "wt", stderr);
+  }
+#endif
+
   // seeding
   U32 seed = time(NULL);
   srand(seed);
