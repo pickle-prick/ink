@@ -7983,6 +7983,8 @@ ik_frame_to_tyml(IK_Frame *frame)
       {
         IK_Box *group = box->parent;
 
+        if(box->flags&IK_BoxFlag_Deleted) continue;
+
         SE_Struct()
         {
           /////////////////////////////////
@@ -8172,6 +8174,7 @@ ik_frame_from_tyml(String8 path)
       IK_Key group_key = ik_key_make(group_key_src.x, group_key_src.y);
       IK_Box *group = ik_box_from_key(group_key);
       U64 flags = se_u64_from_tag(n, str8_lit("flags"));
+      Assert(!(flags&IK_BoxFlag_Deleted));
 
       // NOTE(k): push front
       IK_Box *box = ik_build_box_from_key_(flags, key, 0);

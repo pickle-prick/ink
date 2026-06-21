@@ -11,3 +11,4 @@ tmp/
 gmon.out
 profiler
 spall_capture
+.nvim.lua
