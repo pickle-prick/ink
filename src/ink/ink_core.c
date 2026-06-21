@@ -4154,8 +4154,8 @@ IK_BOX_DRAW(stroke)
 
   // Tweak these to change the "feel"
   F32 thinning_factor = 0.9f; // How much it thins when fast (0.0 = no change, 0.9 = very thin)
-  F32 responsiveness = 0.6f;  // How fast thickness reacts to speed changes (0.1 = slow/smooth, 0.5 = twitchy)
-  F32 max_velocity = (8.0f*ik_state->dpi/96.f) * ik_state->world_to_screen_ratio.x; // Velocity cap for calculation
+  F32 responsiveness = 0.2f;  // How fast thickness reacts to speed changes (0.1 = slow/smooth, 0.5 = twitchy)
+  F32 max_velocity = (4.0f*ik_state->dpi/96.f) * ik_state->world_to_screen_ratio.x; // Velocity cap for calculation
 
   U64 point_index = 0;
   while(p2)
@@ -4179,10 +4179,13 @@ IK_BOX_DRAW(stroke)
       F32 target_width = base_stroke_size * (1.0f - (velocity_filter * thinning_factor));
 
       // Taper Logic: Force start to be thin
-      // if(point_index < 2)
-      // {
-      //   target_width *= ((F32)point_index / 2.0f);
-      // }
+      if(point_index < 3)
+      {
+        for(int i = point_index; i < 3; i++)
+        {
+          target_width *= 0.8;
+        }
+      }
 
       // Smooth the width transition
       current_width = current_width * (1.0f - responsiveness) + target_width * responsiveness;
@@ -4237,7 +4240,7 @@ IK_BOX_DRAW(stroke)
       // Simply draw a line to the final real point
       // Ideally we taper this out too
       // FIXME: this is too small
-      dr_line_keyed(m2, p1->position, stroke_color, min_visiable_stroke_size, edge_softness, box->key_3f32);
+      // dr_line_keyed(m2, p1->position, stroke_color, min_visiable_stroke_size, edge_softness, box->key_3f32);
     }
   }
 #endif
@@ -8224,6 +8227,10 @@ ik_frame_from_tyml(String8 path)
       AssertAlways(ik_key_match(ik_key_zero(), parent_key));
       IK_Box *parent = ik_box_from_key(parent_key);
       U64 flags = se_u64_from_tag(n, str8_lit("flags"));
+      if(flags&IK_BoxFlag_Deleted)
+      {
+        flags &= (~IK_BoxFlag_Deleted);
+      }
       Assert(!(flags&IK_BoxFlag_Deleted));
 
       // NOTE(k): push front
