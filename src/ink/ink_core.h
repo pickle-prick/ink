@@ -796,7 +796,9 @@ struct IK_State
   // camera
   Mat4x4F32             proj_mat;
   Mat4x4F32             proj_mat_inv;
-  Vec2F32               world_to_screen_ratio;
+  // FIXME: we should probably renaming these, it's confusing
+  Vec2F32               screen_to_world_factor;
+  Vec2F32               world_to_screen_factor;
 
   // mouse
   Vec2F32               mouse;
@@ -1172,6 +1174,16 @@ internal IK_CmdKindInfo *ik_cmd_kind_info_from_string(String8 string);
 //~ Helpers
 
 #define ik_rect_from_box(b) ((Rng2F32){b->position.x, b->position.y, b->position.x+b->rect_size.x, b->position.y+b->rect_size.y})
+
+// culling
+
+internal inline bool ik_rect_in_viewport(Rng2F32 rect);
+internal inline R_Rect2DInst *ik_dr_rect(Rng2F32 dst, Vec4F32 color, F32 corner_radius, F32 border_thickness, F32 edge_softness);
+internal inline R_Rect2DInst *ik_dr_rect_keyed(Rng2F32 dst, Vec4F32 color, F32 corner_radius, F32 border_thickness, F32 edge_softness, Vec3F32 key);
+internal inline R_Rect2DInst *ik_dr_img(Rng2F32 dst, Rng2F32 src, R_Handle texture, Vec4F32 color, F32 corner_radius, F32 border_thickness, F32 edge_softness);
+internal inline R_Rect2DInst *ik_dr_img_keyed(Rng2F32 dst, Rng2F32 src, R_Handle texture, Vec4F32 color, F32 corner_radius, F32 border_thickness, F32 edge_softness, Vec3F32 key);
+internal inline R_Rect2DInst *ik_dr_line(Vec2F32 a, Vec2F32 b, Vec4F32 color, F32 line_thickness, F32 edge_softness);
+internal inline R_Rect2DInst *ik_dr_line_keyed(Vec2F32 a, Vec2F32 b, Vec4F32 color, F32 line_thickness, F32 edge_softness, Vec3F32 key);
 
 // projection
 internal Vec2F32 ik_screen_pos_in_world(Mat4x4F32 proj_view_mat_inv, Vec2F32 pos);

@@ -1350,8 +1350,8 @@ ik_frame(void)
     {
       IK_CameraDrag drag = *ik_get_drag_struct(IK_CameraDrag);
       Vec2F32 delta = sub_2f32(drag.drag_start_mouse, ik_state->mouse);
-      delta.x *= ik_state->world_to_screen_ratio.x;
-      delta.y *= ik_state->world_to_screen_ratio.y;
+      delta.x *= ik_state->screen_to_world_factor.x;
+      delta.y *= ik_state->screen_to_world_factor.y;
       Rng2F32 rect = shift_2f32(drag.drag_start_rect, delta);
       camera->target_rect = rect;
       camera->rect = rect;
@@ -1359,7 +1359,7 @@ ik_frame(void)
     camera->is_panning = is_panning;
 
     // camera animations
-    F32 ep = (ik_state->dpi/96.f)*1.1*ik_state->world_to_screen_ratio.x;
+    F32 ep = (ik_state->dpi/96.f)*1.1*ik_state->screen_to_world_factor.x;
     if(abs_f32(camera->target_rect.x0-camera->rect.x0) < ep) camera->rect.x0 = camera->target_rect.x0;
     if(abs_f32(camera->target_rect.x1-camera->rect.x1) < ep) camera->rect.x1 = camera->target_rect.x1;
     if(abs_f32(camera->target_rect.y0-camera->rect.y0) < ep) camera->rect.y0 = camera->target_rect.y0;
@@ -1385,9 +1385,10 @@ ik_frame(void)
   ik_state->proj_mat_inv = inverse_4x4f32(ik_state->proj_mat);
   ik_state->mouse_in_world = ik_mouse_in_world(ik_state->proj_mat_inv);
   Vec2F32 camera_rect_dim = dim_2f32(camera->rect);
-  ik_state->world_to_screen_ratio = (Vec2F32){camera_rect_dim.x/ik_state->window_dim.x, camera_rect_dim.y/ik_state->window_dim.y};
-  ik_state->mouse_delta_in_world.x = ik_state->mouse_delta.x*ik_state->world_to_screen_ratio.x;
-  ik_state->mouse_delta_in_world.y = ik_state->mouse_delta.y*ik_state->world_to_screen_ratio.y;
+  ik_state->screen_to_world_factor = (Vec2F32){camera_rect_dim.x/ik_state->window_dim.x, camera_rect_dim.y/ik_state->window_dim.y};
+  ik_state->world_to_screen_factor = (Vec2F32){ik_state->window_dim.x/camera_rect_dim.x, ik_state->window_dim.y/camera_rect_dim.y};
+  ik_state->mouse_delta_in_world.x = ik_state->mouse_delta.x*ik_state->screen_to_world_factor.x;
+  ik_state->mouse_delta_in_world.y = ik_state->mouse_delta.y*ik_state->screen_to_world_factor.y;
 
   ////////////////////////////////
   //~ Main scene building
@@ -1786,7 +1787,7 @@ ik_frame(void)
         F32 scroll_t = ui_anim(ui_key_from_stringf(ui_key_zero(), "camera_scroll_t"), 1, .reset = 0, .rate = ik_state->animation.slow_rate);
         F32 y_pct = mix_1f32(0.01, 0.04, scroll_t);
         F32 step_px = ik_state->window_dim.y*y_pct*(F32)delta16.y;
-        F32 step_world = step_px * ik_state->world_to_screen_ratio.y;
+        F32 step_world = step_px * ik_state->screen_to_world_factor.y;
 
         camera->anim_rate = ik_state->animation.fast_rate;
         camera->target_rect.y0 += step_world;
@@ -2007,7 +2008,7 @@ ik_frame(void)
     if(ik_tool() == IK_ToolKind_Rectangle && ik_pressed(blank->sig))
     {
       F32 font_size = ik_top_font_size();
-      F32 font_size_in_world = font_size * ik_state->world_to_screen_ratio.x * 2;
+      F32 font_size_in_world = font_size * ik_state->screen_to_world_factor.x*2;
       IK_Box *box = ik_build_box_from_stringf(0, "rect###%I64u", os_now_microseconds());
       box->flags |= (IK_BoxFlag_DrawBackground|
                      IK_BoxFlag_MouseClickable|
@@ -2019,7 +2020,7 @@ ik_frame(void)
                      IK_BoxFlag_DragToPosition|
                      IK_BoxFlag_DragToScaleRectSize);
       box->position = ik_state->mouse_in_world;
-      box->rect_size = v2f32(ik_state->world_to_screen_ratio.x, ik_state->world_to_screen_ratio.y);
+      box->rect_size = v2f32(ik_state->screen_to_world_factor.x, ik_state->screen_to_world_factor.y);
       box->font_size = font_size_in_world;
       box->text_align = IK_TextAlign_HCenter|IK_TextAlign_VCenter;
       box->disabled_t = 1.0;
@@ -2101,7 +2102,7 @@ ik_frame(void)
 
             // decide initial width&height
             F32 default_screen_width = ik_state->window_dim.x * 0.25;
-            F32 width = default_screen_width * ik_state->world_to_screen_ratio.x;
+            F32 width = default_screen_width * ik_state->screen_to_world_factor.x;
             F32 height = width;
             F32 ratio = 1.0;
 
@@ -2276,13 +2277,13 @@ ik_frame(void)
           {
             Rng2F32 drop_shadow_rect = shift_2f32(pad_2f32(dst, 8), v2f32(4, 4));
             Vec4F32 drop_shadow_color = ik_rgba_from_theme_color(IK_ThemeColor_DropShadow);
-            dr_rect(drop_shadow_rect, drop_shadow_color, 0.8f, 0, 8.f);
+            ik_dr_rect(drop_shadow_rect, drop_shadow_color, 0.8f, 0, 8.f);
           }
 
           // draw rect background
           if(box->flags & IK_BoxFlag_DrawBackground && !zero_dim)
           {
-            dr_rect_keyed(dst, box->background_color, 0, 0, 0, box->key_3f32);
+            ik_dr_rect_keyed(dst, box->background_color, 0, 0, 0, box->key_3f32);
           }
           
           // draw image
@@ -2316,7 +2317,7 @@ ik_frame(void)
             if(image->loaded)
             {
               Rng2F32 src = {0,0, box->image->x, box->image->y};
-              dr_img_keyed(dst, src, box->image->handle, v4f32(1,1,1,1), 0, 0, 0, box->key_3f32);
+              ik_dr_img_keyed(dst, src, box->image->handle, v4f32(1,1,1,1), 0, 0, 0, box->key_3f32);
             }
           }
 
@@ -2342,17 +2343,17 @@ ik_frame(void)
           if(box->flags & IK_BoxFlag_DrawBorder && !zero_dim)
           {
             // smoothstep
-            F32 min_border_thickness = 1.0 * ik_state->world_to_screen_ratio.x;
-            F32 max_border_thickness = 2.5 * ik_state->world_to_screen_ratio.x;
-            F32 min_size = 400.f * ik_state->world_to_screen_ratio.x;
-            F32 max_size = 600.f * ik_state->world_to_screen_ratio.x;
+            F32 min_border_thickness = 1.0 * ik_state->screen_to_world_factor.x;
+            F32 max_border_thickness = 2.5 * ik_state->screen_to_world_factor.x;
+            F32 min_size = 400.f * ik_state->screen_to_world_factor.x;
+            F32 max_size = 600.f * ik_state->screen_to_world_factor.x;
             F32 size = Max(box->rect_size.x, box->rect_size.y);
             F32 t = (size-min_size)/(max_size-min_size);
             t = Clamp(0.f, t, 1.f);
 
             F32 border_thickness = mix_1f32(min_border_thickness, max_border_thickness, t);
-            F32 corner_radius = 1.0 * ik_state->world_to_screen_ratio.x;
-            R_Rect2DInst *inst = dr_rect_keyed(pad_2f32(dst, 0.5*border_thickness), box->border_color, corner_radius, border_thickness, border_thickness/2.0, box->key_3f32);
+            F32 corner_radius = 1.0 * ik_state->screen_to_world_factor.x;
+            ik_dr_rect_keyed(pad_2f32(dst, 0.5*border_thickness), box->border_color, corner_radius, border_thickness, border_thickness/2.0, box->key_3f32);
           }
 
           if(box->flags & IK_BoxFlag_DrawHotEffects)
@@ -2364,30 +2365,33 @@ ik_frame(void)
             }
 
             F32 t = box->hot_t * (1.f-effective_active_t);
-            R_Rect2DInst *inst = dr_rect_keyed(dst, v4f32(0, 0, 0, 0), 0, 0, 1.f, box->key_3f32);
-            Vec4F32 color = ik_rgba_from_theme_color(IK_ThemeColor_Hover);
-            color.w *= t*0.1f;
-            inst->colors[Corner_00] = color;
-            inst->colors[Corner_01] = color;
-            inst->colors[Corner_10] = color;
-            inst->colors[Corner_11] = color;
-            inst->colors[Corner_10].w *= t;
-            inst->colors[Corner_11].w *= t;
-            // MemoryCopyArray(inst->corner_radii, box->corner_radii);
+            R_Rect2DInst *inst = ik_dr_rect_keyed(dst, v4f32(0, 0, 0, 0), 0, 0, 1.f, box->key_3f32);
+            if(inst)
+            {
+              Vec4F32 color = ik_rgba_from_theme_color(IK_ThemeColor_Hover);
+              color.w *= t*0.1f;
+              inst->colors[Corner_00] = color;
+              inst->colors[Corner_01] = color;
+              inst->colors[Corner_10] = color;
+              inst->colors[Corner_11] = color;
+              inst->colors[Corner_10].w *= t;
+              inst->colors[Corner_11].w *= t;
+              // MemoryCopyArray(inst->corner_radii, box->corner_radii);
+            }
           }
 
           // draw selection highlight
           if(box->sig.f & IK_SignalFlag_Select && !zero_dim)
           {
-            dr_rect_keyed(pad_2f32(dst, 0*ik_state->world_to_screen_ratio.x), v4f32(1,1,0,0.1), 0, 0, 0, box->key_3f32);
-            F32 border_thickness = 2*ik_state->world_to_screen_ratio.x;
-            dr_rect_keyed(pad_2f32(dst, border_thickness*2), v4f32(0.1,0,0.5,1), 0, border_thickness, 0, box->key_3f32);
+            ik_dr_rect_keyed(pad_2f32(dst, 0*ik_state->screen_to_world_factor.x), v4f32(1,1,0,0.1), 0, 0, 0, box->key_3f32);
+            F32 border_thickness = 2*ik_state->screen_to_world_factor.x;
+            ik_dr_rect_keyed(pad_2f32(dst, border_thickness*2), v4f32(0.1,0,0.5,1), 0, border_thickness, 0, box->key_3f32);
           }
 
           // draw key overlay
           if(box->flags & IK_BoxFlag_DrawKeyOverlay)
           {
-            dr_rect_keyed(dst, v4f32(0,0,0,0), 0, 0, 0, box->key_3f32);
+            ik_dr_rect_keyed(dst, v4f32(0,0,0,0), 0, 0, 0, box->key_3f32);
           }
         }
       }
@@ -2400,7 +2404,7 @@ ik_frame(void)
       if(b)
       {
         Rng2F32 dst = ik_rect_from_box(b);
-        dr_rect_keyed(dst, v4f32(0,0,0,0), 0, 0, 0, b->key_3f32);
+        ik_dr_rect_keyed(dst, v4f32(0,0,0,0), 0, 0, 0, b->key_3f32);
       }
     }
 
@@ -2420,7 +2424,7 @@ ik_frame(void)
       Vec4F32 outline_color = linear_from_srgba(rgba_from_u32(0xF6FB05FF));
 
       Rng2F32 rect = {.p0 = ik_state->mouse, .p1 = ik_state->mouse};
-      F32 stroke_size_px = (ik_top_stroke_size()/ik_state->world_to_screen_ratio.x)*0.5;
+      F32 stroke_size_px = (ik_top_stroke_size()*ik_state->screen_to_world_factor.x)*0.5;
 
       rect = pad_2f32(rect, stroke_size_px);
       dr_rect(rect, stroke_color, stroke_size_px+2.0, 0, 1.f);
@@ -2807,7 +2811,7 @@ ik_paste()
   {
     // decide initial width&height
     F32 default_screen_width = ik_state->window_dim.x * 0.25;
-    F32 width = default_screen_width * ik_state->world_to_screen_ratio.x;
+    F32 width = default_screen_width * ik_state->screen_to_world_factor.x;
     F32 height = width;
     F32 ratio = 1.0;
 
@@ -4078,13 +4082,13 @@ IK_BOX_DRAW(text)
     // NOTE(k): we have \n run which is not renderable, and it will cutoff grouping continuation 
     if(!r_handle_match(r_handle_zero(), text_rect->tex))
     {
-      dr_img_keyed(text_rect->dst, text_rect->src, text_rect->tex, text_rect->color, 0,0,0, box->key_3f32);
+      ik_dr_img_keyed(text_rect->dst, text_rect->src, text_rect->tex, text_rect->color, 0,0,0, box->key_3f32);
     }
     // dr_rect(text_rect->dst, v4f32(1,0,0,0.5), 0,1,0);
 
     if(text_rect->highlight)
     {
-      dr_rect(text_rect->parent_rect, v4f32(0,0,1,0.2), 0, 0, 0);
+      ik_dr_rect(text_rect->parent_rect, v4f32(0,0,1,0.2), 0, 0, 0);
     }
   }
 
@@ -4098,23 +4102,23 @@ IK_BOX_DRAW(text)
   mark_rect.x0 -= cursor_thickness;
   mark_rect.x1 += cursor_thickness;
 
-  F32 cursor_thickness_px = cursor_thickness/ik_state->world_to_screen_ratio.x;
+  F32 cursor_thickness_px = cursor_thickness*ik_state->screen_to_world_factor.x;
   F32 corner_radius = cursor_thickness*0.5;
-  F32 border_thickness = 2.0*ik_state->world_to_screen_ratio.x; 
-  F32 softness = 1.0*ik_state->world_to_screen_ratio.x; 
+  F32 border_thickness = 2.0*ik_state->screen_to_world_factor.x; 
+  F32 softness = 1.0*ik_state->screen_to_world_factor.x; 
   Vec4F32 border_color = v4f32(1.0, 0,0,1);
   B32 draw_border = (cursor_thickness_px) > 3.5;
 
   // draw cursor
   {
-    dr_rect(cursor_rect, v4f32(0,0,1,1), corner_radius, 0, softness);
-    if(draw_border) dr_rect(cursor_rect, border_color, corner_radius, border_thickness, softness);
+    ik_dr_rect(cursor_rect, v4f32(0,0,1,1), corner_radius, 0, softness);
+    if(draw_border) ik_dr_rect(cursor_rect, border_color, corner_radius, border_thickness, softness);
   }
 
   // draw mark
   {
-    dr_rect(mark_rect, v4f32(0,1,0,1), corner_radius, 0, softness);
-    if(draw_border) dr_rect(mark_rect, border_color, corner_radius, border_thickness, softness);
+    ik_dr_rect(mark_rect, v4f32(0,1,0,1), corner_radius, 0, softness);
+    if(draw_border) ik_dr_rect(mark_rect, border_color, corner_radius, border_thickness, softness);
   }
   ProfEnd();
 }
@@ -4125,7 +4129,7 @@ ik_text(String8 string, Vec2F32 pos)
   IK_Box *box;
 
   F32 font_size = ik_top_font_size();
-  F32 font_size_in_world = font_size * ik_state->world_to_screen_ratio.x * 2;
+  F32 font_size_in_world = font_size * ik_state->screen_to_world_factor.x * 2;
 
   box = ik_build_box_from_stringf(0, "text###%I64u", os_now_microseconds());
   box->flags |= IK_BoxFlag_MouseClickable|
@@ -4223,7 +4227,7 @@ IK_BOX_UPDATE(stroke)
     Vec2F32 next_position = ik_state->mouse_in_world;
 
     // Too small = jittery lines. Too large = blocky curves
-    F32 min_capture_dist = 2.f*ik_state->dpi/96.f * ik_state->world_to_screen_ratio.x;
+    F32 min_capture_dist = 2.f*ik_state->dpi/96.f * ik_state->screen_to_world_factor.x;
     F32 dist = length_2f32(sub_2f32(next_position, last_position));
 
     if(box->point_count == 0 || dist > min_capture_dist)
@@ -4317,10 +4321,10 @@ IK_BOX_DRAW(stroke)
   }
 #else
   F32 base_stroke_size = box->stroke_size;
-  F32 min_visiable_stroke_size = (4.5f * ik_state->dpi/96.f) * ik_state->world_to_screen_ratio.x;
+  F32 min_visiable_stroke_size = (4.5f * ik_state->dpi/96.f) * ik_state->screen_to_world_factor.x;
 
   Vec4F32 stroke_color = linear_from_srgba(box->stroke_color);
-  F32 edge_softness = (1.f*ik_state->dpi/96.f) * ik_state->world_to_screen_ratio.x;
+  F32 edge_softness = (1.f*ik_state->dpi/96.f) * ik_state->screen_to_world_factor.x;
 
   IK_Point *p0 = box->first_point;
   IK_Point *p1 = p0 ? p0->next : 0;
@@ -4333,7 +4337,7 @@ IK_BOX_DRAW(stroke)
   // Tweak these to change the "feel"
   F32 thinning_factor = 0.9f; // How much it thins when fast (0.0 = no change, 0.9 = very thin)
   F32 responsiveness = 0.2f;  // How fast thickness reacts to speed changes (0.1 = slow/smooth, 0.5 = twitchy)
-  F32 max_velocity = (4.0f*ik_state->dpi/96.f) * ik_state->world_to_screen_ratio.x; // Velocity cap for calculation
+  F32 max_velocity = (4.0f*ik_state->dpi/96.f) * ik_state->screen_to_world_factor.x; // Velocity cap for calculation
 
   U64 point_index = 0;
   while(p2)
@@ -4381,7 +4385,7 @@ IK_BOX_DRAW(stroke)
       F32 curvature = length_2f32(sub_2f32(scale_2f32(add_2f32(b_p0, b_p2), 0.5f), b_p1));
 
       // More steps if long or very curved
-      U64 steps = (U64)((seg_len + curvature * 2.0f) / (2.0f * ik_state->world_to_screen_ratio.x)); 
+      U64 steps = (U64)((seg_len + curvature * 2.0f) * (2.0f * ik_state->world_to_screen_factor.x)); 
       steps = Clamp(4, steps, 60);
 
       Vec2F32 prev = b_p0;
@@ -4595,11 +4599,11 @@ IK_BOX_DRAW(arrow)
     }
   }
 #else
-  F32 min_visiable_stroke_size = (4.5f * ik_state->dpi/96.f) * ik_state->world_to_screen_ratio.x;
+  F32 min_visiable_stroke_size = (4.5f * ik_state->dpi/96.f) * ik_state->screen_to_world_factor.x;
   F32 stroke_size = ClampBot(box->stroke_size, min_visiable_stroke_size);
   Vec4F32 stroke_clr = linear_from_srgba(box->stroke_color);
   // Softness proportional to screen scale for anti-aliasing
-  F32 edge_softness = 1.0f * ik_state->world_to_screen_ratio.x; 
+  F32 edge_softness = 1.0f * ik_state->screen_to_world_factor.x; 
 
   IK_Point *pa = box->first_point;
   IK_Point *pm = pa->next;
@@ -4619,7 +4623,7 @@ IK_BOX_DRAW(arrow)
     // Heuristic: More steps if long or curvy
     F32 seg_len = length_2f32(sub_2f32(a, b));
     F32 curvature = length_2f32(sub_2f32(scale_2f32(add_2f32(a, b), 0.5f), c));
-    U64 steps = (U64)((seg_len + curvature * 2.0f) / (4.0f * ik_state->world_to_screen_ratio.x));
+    U64 steps = (U64)((seg_len + curvature * 2.0f) * (4.0f * ik_state->world_to_screen_factor.x));
     steps = Clamp(10, steps, 100);
 
     Vec2F32 prev = a;
@@ -5667,13 +5671,6 @@ ik_ui_stats(void)
       ui_spacer(ui_pct(1.0, 0.0));
       ui_labelf("%.2f %.2f", ik_state->window_dim.x, ik_state->window_dim.y);
     }
-    UI_Row
-      UI_PrefWidth(ui_text_dim(1, 1.0))
-    {
-      ui_labelf("world_to_screen_ratio");
-      ui_spacer(ui_pct(1.0, 0.0));
-      ui_labelf("%.2f %.2f", ik_state->world_to_screen_ratio.x, ik_state->world_to_screen_ratio.y);
-    }
     ui_divider(ui_em(0.1, 0.0));
     UI_Row
       UI_PrefWidth(ui_text_dim(1, 1.0))
@@ -6196,7 +6193,7 @@ ik_ui_selection(void)
 
     if(box == last_box)
     {
-      F32 eps = 1e-2 * ik_state->world_to_screen_ratio.x;
+      F32 eps = 1e-2 * ik_state->screen_to_world_factor.x;
       box_rect.x0 += ik_state->animation.vast_rate*(target_box_rect.x0 - box_rect.x0);
       box_rect.y0 += ik_state->animation.slow_rate*(target_box_rect.y0 - box_rect.y0);
       box_rect.x1 += ik_state->animation.vast_rate*(target_box_rect.x1 - box_rect.x1);
@@ -6540,8 +6537,8 @@ ik_ui_selection(void)
             {
               Vec2F32 drag_start_pos = *ui_get_drag_struct(Vec2F32);
               Vec2F32 delta = sub_2f32(ui_mouse(), ui_state->drag_start_mouse);
-              delta.x *= ik_state->world_to_screen_ratio.x;
-              delta.y *= ik_state->world_to_screen_ratio.y;
+              delta.x *= ik_state->screen_to_world_factor.x;
+              delta.y *= ik_state->screen_to_world_factor.y;
               p->position.x = drag_start_pos.x + delta.x;
               p->position.y = drag_start_pos.y + delta.y;
             }
@@ -7365,7 +7362,7 @@ ik_ui_bottom_bar()
 
   UI_Parent(container)
   {
-    F32 zoom_level = round_f32(ik_state->world_to_screen_ratio.x*100);
+    F32 zoom_level = round_f32(ik_state->screen_to_world_factor.x*100);
     // camera zoom control
     UI_Transparency(0.3)
     UI_FontSize(ui_top_font_size()*1.15f)
@@ -8802,6 +8799,90 @@ ik_image_to_png_file(IK_Image *image, String8 path)
 
 /////////////////////////////////
 //~ Helpers
+
+// culling
+
+internal inline bool
+ik_rect_in_viewport(Rng2F32 rect)
+{
+  IK_Frame *frame = ik_top_frame();
+  Rng2F32 viewport = frame->camera.rect; 
+  Vec2F32 dim = dim_2f32(viewport);
+  dim.x *= ik_state->world_to_screen_factor.x;
+  dim.y *= ik_state->world_to_screen_factor.y;
+  return overlaps_2f32(viewport, rect) && dim.x > 1.f && dim.y > 1.f;
+}
+
+internal inline R_Rect2DInst *
+ik_dr_rect(Rng2F32 dst, Vec4F32 color, F32 corner_radius, F32 border_thickness, F32 edge_softness)
+{
+  R_Rect2DInst *ret = 0;
+  if(ik_rect_in_viewport(dst))
+  {
+    ret = dr_rect(dst,color,corner_radius,border_thickness,edge_softness);
+  }
+  return ret;
+}
+
+internal inline R_Rect2DInst *
+ik_dr_rect_keyed(Rng2F32 dst, Vec4F32 color, F32 corner_radius, F32 border_thickness, F32 edge_softness, Vec3F32 key)
+{
+  R_Rect2DInst *ret = 0;
+  if(ik_rect_in_viewport(dst))
+  {
+    ret = dr_rect_keyed(dst,color,corner_radius,border_thickness,edge_softness,key);
+  }
+  return ret;
+}
+
+internal inline R_Rect2DInst *
+ik_dr_img(Rng2F32 dst, Rng2F32 src, R_Handle texture, Vec4F32 color, F32 corner_radius, F32 border_thickness, F32 edge_softness)
+{
+  R_Rect2DInst *ret = 0;
+  if(ik_rect_in_viewport(dst))
+  {
+    ret = dr_img(dst,src,texture,color,corner_radius,border_thickness,edge_softness);
+  }
+  return ret;
+}
+
+internal inline R_Rect2DInst *
+ik_dr_img_keyed(Rng2F32 dst, Rng2F32 src, R_Handle texture, Vec4F32 color, F32 corner_radius, F32 border_thickness, F32 edge_softness, Vec3F32 key)
+{
+  R_Rect2DInst *ret = 0;
+  if(ik_rect_in_viewport(dst))
+  {
+    ret = dr_img_keyed(dst,src,texture,color,corner_radius,border_thickness,edge_softness,key);
+  }
+  return ret;
+}
+
+internal inline R_Rect2DInst *
+ik_dr_line(Vec2F32 a, Vec2F32 b, Vec4F32 color, F32 line_thickness, F32 edge_softness)
+{
+  R_Rect2DInst *ret = 0;
+
+  Rng2F32 dst = {.p0 = a, .p1 = b};
+  dst = pad_2f32(dst, line_thickness*0.51);
+  if(ik_rect_in_viewport(dst))
+  {
+    ret = dr_line(a,b,color,line_thickness,edge_softness);
+  }
+  return ret;
+}
+
+internal inline R_Rect2DInst *
+ik_dr_line_keyed(Vec2F32 a, Vec2F32 b, Vec4F32 color, F32 line_thickness, F32 edge_softness, Vec3F32 key)
+{
+  R_Rect2DInst *ret = 0;
+  Rng2F32 dst = {.p0 = a, .p1 = b};
+  dst = pad_2f32(dst, line_thickness*0.51);
+  if(ik_rect_in_viewport(dst))
+  {
+    ret = dr_line_keyed(a,b,color,line_thickness,edge_softness,key);
+  }
+  return ret;
+}
 
 // projection
 internal Vec2F32
