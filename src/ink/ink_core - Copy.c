@@ -3481,6 +3481,9 @@ ik_box_clone(IK_Box *src)
   return ret;
 }
 
+internal void
+ik_edit_box_text_cache_release(IK_Box *box);
+
 //- box node destruction
 internal void
 ik_box_release(IK_Box *box, B32 recursive)
@@ -3531,6 +3534,9 @@ ik_box_release(IK_Box *box, B32 recursive)
       ik_point_release(p);
     }
   }
+
+  //- cached text layout
+  ik_edit_box_text_cache_release(box);
 
   // remove from box list
   IK_BoxList *list = &frame->box_list;
@@ -3593,7 +3599,36 @@ struct IK_EditBoxTextRect
   Rng2F32 src;
   R_Handle tex;
   Vec4F32 color;
-  B32 highlight;
+  U32 column;
+  U32 next_column;
+};
+
+typedef struct IK_EditBoxTextLine IK_EditBoxTextLine;
+struct IK_EditBoxTextLine
+{
+  Rng2F32 local_rect;
+  U32 first_text_rect_index;
+  U32 text_rect_count;
+  U32 column_end;
+};
+
+typedef struct IK_EditBoxTextCache IK_EditBoxTextCache;
+struct IK_EditBoxTextCache
+{
+  Arena *arena;
+  U64 arena_reset_pos;
+  String8 string;
+  Vec2F32 box_dim;
+  F32 font_size;
+  F32 text_padding;
+  F32 tab_size;
+  FNT_Tag font;
+  IK_TextAlign text_align;
+  Vec4F32 text_color;
+  B32 wrap_text;
+  Vec2F32 text_bounds;
+  IK_EditBoxTextRect *text_rects;
+  IK_EditBoxTextLine *text_lines;
 };
 
 typedef struct IK_EditBoxDrawData IK_EditBoxDrawData;
@@ -3601,8 +3636,272 @@ struct IK_EditBoxDrawData
 {
   Rng2F32 mark_rect;
   Rng2F32 cursor_rect;
-  IK_EditBoxTextRect *text_rects;
+  TxtPt mouse_pt;
+  TxtRng selection_rng;
+  B32 draw_carets;
 };
+
+internal IK_EditBoxTextCache *
+ik_edit_box_text_cache_from_box(IK_Box *box)
+{
+  return (IK_EditBoxTextCache *)box->text_cache;
+}
+
+internal void
+ik_edit_box_text_cache_release(IK_Box *box)
+{
+  IK_EditBoxTextCache *cache = ik_edit_box_text_cache_from_box(box);
+  if(cache != 0)
+  {
+    arena_release(cache->arena);
+    box->text_cache = 0;
+  }
+}
+
+internal IK_EditBoxTextCache *
+ik_edit_box_text_cache_ensure(IK_Box *box)
+{
+  IK_EditBoxTextCache *cache = ik_edit_box_text_cache_from_box(box);
+  if(cache == 0)
+  {
+    Arena *arena = arena_alloc(.reserve_size = MB(4), .commit_size = KB(64));
+    cache = push_array(arena, IK_EditBoxTextCache, 1);
+    cache->arena = arena;
+    cache->arena_reset_pos = arena_pos(arena);
+    box->text_cache = cache;
+  }
+  return cache;
+}
+
+internal B32
+ik_edit_box_text_cache_is_dirty(IK_Box *box, Vec2F32 box_dim)
+{
+  IK_EditBoxTextCache *cache = ik_edit_box_text_cache_from_box(box);
+  FNT_Tag font = ik_font_from_slot(box->font_slot);
+  B32 wrap_text = !!(box->flags & IK_BoxFlag_WrapText);
+  B32 dirty = (cache == 0);
+  dirty = dirty || !MemoryMatchStruct(&cache->string, &box->string);
+  dirty = dirty || !MemoryMatchStruct(&cache->box_dim, &box_dim);
+  dirty = dirty || cache->font_size != box->font_size;
+  dirty = dirty || cache->text_padding != box->text_padding;
+  dirty = dirty || cache->tab_size != box->tab_size;
+  dirty = dirty || !fnt_tag_match(cache->font, font);
+  dirty = dirty || cache->text_align != box->text_align;
+  dirty = dirty || !MemoryMatchStruct(&cache->text_color, &box->text_color);
+  dirty = dirty || cache->wrap_text != wrap_text;
+  return dirty;
+}
+
+internal void
+ik_edit_box_text_cache_rebuild(IK_Box *box, Vec2F32 box_dim)
+{
+  IK_EditBoxTextCache *cache = ik_edit_box_text_cache_ensure(box);
+  Arena *arena = cache->arena;
+  arena_pop_to(arena, cache->arena_reset_pos);
+  cache->text_rects = 0;
+  cache->text_lines = 0;
+
+  String8 string = box->string;
+  FNT_Tag font = ik_font_from_slot(box->font_slot);
+  FNT_Metrics font_metrics = fnt_metrics_from_tag_size(font, M_1);
+  F32 font_size = box->font_size;
+  F32 font_size_scale = font_size / (F32)M_1;
+  F32 text_padding_x = box->text_padding * font_size_scale;
+  F32 max_x = box_dim.x - text_padding_x*2;
+  F32 max_y = box_dim.y;
+  B32 wrap_text = !!(box->flags & IK_BoxFlag_WrapText);
+
+  Vec2F32 total_text_dim = {0};
+  Vec2F32 empty_text_dim = {0};
+  DR_FRunList *line_fruns = 0;
+  U64 source_line_count = 0;
+  String8List lines = str8_split(arena, string, (U8*)"\n", 1, StringSplitFlag_KeepEmpties);
+
+  for(String8Node *n = lines.first; n != 0; n = n->next)
+  {
+    String8 line_string = n->string;
+    for(;;)
+    {
+      DR_FStrList fstrs = {0};
+      DR_FStr fstr = {0};
+      fstr.string = line_string;
+      fstr.params.font = font;
+      fstr.params.color = box->text_color;
+      fstr.params.size = M_1;
+      dr_fstrs_push(arena, &fstrs, &fstr);
+
+      DR_FRunList fruns = dr_fruns_from_fstrs(arena, box->tab_size, &fstrs);
+      if(line_string.size == 0)
+      {
+        fruns.first->v.run.dim.y = font_metrics.ascent + font_metrics.descent;
+        fruns.dim.y = fruns.first->v.run.dim.y;
+      }
+
+      U64 cutoff = 0;
+      U64 cutoff_size = 0;
+      Vec2F32 run_dim_px = scale_2f32(fruns.dim, font_size_scale);
+      if(wrap_text && run_dim_px.x > max_x)
+      {
+        FNT_PieceArray pieces = fruns.first->v.run.pieces;
+        FNT_Piece *piece_first = pieces.v;
+        FNT_Piece *piece_opl = piece_first + pieces.count;
+        F32 cutoff_x = 0;
+        for(FNT_Piece *piece = piece_opl - 1;
+            piece > piece_first && run_dim_px.x > max_x;
+            piece -= 1)
+        {
+          cutoff += 1;
+          cutoff_size += piece->decode_size;
+          cutoff_x += piece->advance;
+          run_dim_px.x -= piece->advance * font_size_scale;
+        }
+
+        fruns.first->v.run.pieces.count -= cutoff;
+        fruns.dim.x -= cutoff_x;
+        fruns.first->v.run.dim.x -= cutoff_x;
+      }
+
+      if(cutoff == 0 && n->next != 0)
+      {
+        FNT_Piece *pieces = fruns.first->v.run.pieces.v;
+        U64 piece_count = fruns.first->v.run.pieces.count;
+        U64 next_piece_count = piece_count + 1;
+        FNT_Piece *next_pieces = push_array(arena, FNT_Piece, next_piece_count);
+        MemoryCopy(next_pieces, pieces, sizeof(FNT_Piece) * piece_count);
+        next_pieces[next_piece_count - 1].decode_size = 1;
+        fruns.first->v.run.pieces.v = next_pieces;
+        fruns.first->v.run.pieces.count = next_piece_count;
+      }
+
+      line_string.str += (line_string.size - cutoff_size);
+      line_string.size = cutoff_size;
+
+      darray_push(arena, line_fruns, fruns);
+      total_text_dim.x = Max(total_text_dim.x, fruns.dim.x);
+      total_text_dim.y += fruns.dim.y;
+      source_line_count += 1;
+
+      if(cutoff == 0)
+      {
+        break;
+      }
+    }
+  }
+
+  DR_FRunList empty_fruns = {0};
+  {
+    DR_FStrList fstrs = {0};
+    DR_FStr fstr = {0};
+    fstr.string = str8_lit("  ");
+    fstr.params.font = font;
+    fstr.params.color = box->text_color;
+    fstr.params.size = M_1;
+    dr_fstrs_push(arena, &fstrs, &fstr);
+    empty_fruns = dr_fruns_from_fstrs(arena, box->tab_size, &fstrs);
+    empty_text_dim = empty_fruns.dim;
+  }
+
+  DR_FRunList *render_lines = line_fruns;
+  U64 render_line_count = source_line_count;
+  Vec2F32 text_dim = total_text_dim;
+  if(string.size == 0)
+  {
+    render_lines = &empty_fruns;
+    render_line_count = 1;
+    text_dim = empty_text_dim;
+  }
+  text_dim = scale_2f32(text_dim, font_size_scale);
+
+  F32 x = text_padding_x;
+  F32 y = 0;
+  if(box->text_align & IK_TextAlign_VCenter)
+  {
+    y += (max_y - text_dim.y) / 2.0f;
+    y = ClampBot(0, y);
+  }
+  if(box->text_align & IK_TextAlign_Bottom)
+  {
+    y += (max_y - text_dim.y);
+  }
+
+  Vec2F32 text_bounds = {0};
+  U64 c_index = 0;
+  for(U64 line_index = 0; line_index < render_line_count; line_index += 1)
+  {
+    DR_FRunList *fruns = &render_lines[line_index];
+    for(DR_FRunNode *n = fruns->first; n != 0; n = n->next)
+    {
+      DR_FRun run = n->v;
+      Vec2F32 line_run_dim = scale_2f32(run.run.dim, font_size_scale);
+      text_bounds.x = Max(text_bounds.x, line_run_dim.x + text_padding_x*2);
+      text_bounds.y += line_run_dim.y;
+
+      F32 line_x = x;
+      F32 line_y = y + run.run.ascent * font_size_scale;
+      if(box->text_align & IK_TextAlign_HCenter)
+      {
+        line_x += (max_x - line_run_dim.x) / 2.0f;
+        line_x = ClampBot(x, line_x);
+      }
+      if(box->text_align & IK_TextAlign_Right)
+      {
+        line_x += (max_x - line_run_dim.x);
+        line_x = ClampBot(x, line_x);
+      }
+
+      IK_EditBoxTextLine text_line = {0};
+      text_line.local_rect = r2f32p(line_x, y, line_x + line_run_dim.x, y + line_run_dim.y);
+      text_line.first_text_rect_index = (U32)darray_size(cache->text_rects);
+
+      F32 advance_x = 0;
+      for(FNT_Piece *piece = run.run.pieces.v, *piece_opl = run.run.pieces.v + run.run.pieces.count;
+          piece < piece_opl;
+          piece += 1)
+      {
+        F32 this_advance_x = piece->advance * font_size_scale;
+        Rng2F32 src = r2f32p((F32)piece->subrect.x0, (F32)piece->subrect.y0, (F32)piece->subrect.x1, (F32)piece->subrect.y1);
+        Vec2F32 size = dim_2f32(src);
+        Rng2F32 dst = r2f32p(piece->offset.x*font_size_scale + line_x + advance_x,
+                             piece->offset.y*font_size_scale + line_y,
+                             (piece->offset.x + size.x)*font_size_scale + line_x + advance_x,
+                             (piece->offset.y + size.y)*font_size_scale + line_y);
+        Rng2F32 parent_rect = r2f32p(line_x + advance_x,
+                                     y,
+                                     line_x + advance_x + this_advance_x,
+                                     y + line_run_dim.y);
+
+        IK_EditBoxTextRect text_rect = {0};
+        text_rect.parent_rect = parent_rect;
+        text_rect.dst = dst;
+        text_rect.src = src;
+        text_rect.tex = piece->texture;
+        text_rect.color = run.color;
+        text_rect.column = (U32)(c_index + 1);
+        text_rect.next_column = (U32)(c_index + piece->decode_size + 1);
+        darray_push(arena, cache->text_rects, text_rect);
+
+        advance_x += this_advance_x;
+        c_index += piece->decode_size;
+      }
+
+      text_line.text_rect_count = (U32)(darray_size(cache->text_rects) - text_line.first_text_rect_index);
+      text_line.column_end = (U32)(c_index + 1);
+      darray_push(arena, cache->text_lines, text_line);
+      y += line_run_dim.y;
+    }
+  }
+
+  cache->string = box->string;
+  cache->box_dim = box_dim;
+  cache->font_size = box->font_size;
+  cache->text_padding = box->text_padding;
+  cache->tab_size = box->tab_size;
+  cache->font = font;
+  cache->text_align = box->text_align;
+  cache->text_color = box->text_color;
+  cache->wrap_text = wrap_text;
+  cache->text_bounds = text_bounds;
+}
 
 IK_BOX_UPDATE(text)
 {
@@ -3668,279 +3967,91 @@ IK_BOX_UPDATE(text)
   // unpack box rect
   Rng2F32 box_rect = ik_rect_from_box(box);
   Vec2F32 box_dim = dim_2f32(box_rect);
-
-  // unpack font params
-  F32 font_size = box->font_size;
-  F32 font_size_scale = font_size / (F32)M_1;
-  F32 text_padding_x = box->text_padding*font_size_scale;
-  F32 max_x = box_dim.x - text_padding_x*2;
-  F32 max_y = box_dim.y;
-
-  ////////////////////////////////
-  //~ Push line runs
-
-  Vec2F32 total_text_dim = {0,0};
-  Vec2F32 empty_text_dim = {0,0};
   ProfScope("Push line runs")
   {
-    Temp scratch = scratch_begin(0,0);
-
-    // push line runs
-    char *by = "\n";
-    ProfBegin("Split lines");
-    String8List lines = str8_split(ik_frame_arena(), box->string, (U8*)by, 1, StringSplitFlag_KeepEmpties);
-    ProfEnd();
-    DR_FRunList *line_fruns = 0;
-
-    // unpack font params
-    FNT_Tag font = ik_font_from_slot(box->font_slot);
-    FNT_Metrics font_metrics = fnt_metrics_from_tag_size(font, M_1);
-
-    U64 line_index = 0;
-    for(String8Node *n = lines.first; n != 0; n = n->next, line_index++)
+    if(ik_edit_box_text_cache_is_dirty(box, box_dim))
     {
-      String8 string = n->string;
-      for(;;)
-      {
-        DR_FStrList fstrs = {0};
-        DR_FStr fstr = {0};
-        fstr.string = string;
-        fstr.params.font = font;
-        fstr.params.color = box->text_color;
-        fstr.params.size = M_1;
-        fstr.params.underline_thickness = 0;
-        fstr.params.strikethrough_thickness = 0;
-        dr_fstrs_push(scratch.arena, &fstrs, &fstr);
-
-        // TODO(Next): support different fstr
-        DR_FRunList fruns = dr_fruns_from_fstrs(ik_frame_arena(), box->tab_size, &fstrs);
-
-        // NOTE(k): for empty line, the dim are all zero, we need to ClampBot dim_y to line height
-        if(string.size == 0)
-        {
-          fruns.first->v.run.dim.y = font_metrics.ascent+font_metrics.descent;
-          fruns.dim.y = fruns.first->v.run.dim.y;
-        }
-
-        U64 cutoff = 0;
-        U64 cutoff_size = 0;
-        Vec2F32 run_dim_px = {fruns.dim.x*font_size_scale, fruns.dim.y*font_size_scale};
-        // text_wrapping
-        if((box->flags&IK_BoxFlag_WrapText) && run_dim_px.x > max_x)
-        {
-          FNT_PieceArray pieces = fruns.first->v.run.pieces;
-          FNT_Piece *piece_first = pieces.v;
-          FNT_Piece *piece_opl = piece_first+pieces.count;
-          F32 cutoff_x = 0;
-          for(FNT_Piece *piece = piece_opl-1;
-              piece > piece_first && run_dim_px.x > max_x;
-              piece--)
-          {
-            cutoff++;
-            cutoff_size += piece->decode_size;
-            cutoff_x += piece->advance;
-            run_dim_px.x -= piece->advance*font_size_scale;
-          }
-
-          // commit new run dim and piece count
-          fruns.first->v.run.pieces.count -= cutoff;
-          fruns.dim.x -= cutoff_x;
-          fruns.first->v.run.dim.x -= cutoff_x;
-        }
-
-        // has next line? -> push a line break piece
-        if(cutoff == 0 && n->next != 0)
-        {
-          FNT_Piece *pieces = fruns.first->v.run.pieces.v;
-          U64 piece_count = fruns.first->v.run.pieces.count;
-
-          U64 next_piece_count = piece_count+1;
-          FNT_Piece *next_pieces = push_array(ik_frame_arena(), FNT_Piece, next_piece_count);
-          MemoryCopy(next_pieces, pieces, sizeof(FNT_Piece)*piece_count);
-          next_pieces[next_piece_count-1].decode_size = 1;
-
-          fruns.first->v.run.pieces.v = next_pieces;
-          fruns.first->v.run.pieces.count = next_piece_count;
-        }
-
-        // skip to cutoff
-        string.str += (string.size-cutoff_size);
-        string.size = cutoff_size;
-
-        darray_push(ik_frame_arena(), line_fruns, fruns);
-        total_text_dim.x = Max(total_text_dim.x, fruns.dim.x);
-        total_text_dim.y += fruns.dim.y;
-
-        if(cutoff == 0) break;
-      }
+      ik_edit_box_text_cache_rebuild(box, box_dim);
     }
-
-    // push a empty run
-    {
-      DR_FStrList fstrs = {0};
-
-      DR_FStr fstr = {0};
-      fstr.string = str8_lit("  ");
-      fstr.params.font = ik_font_from_slot(box->font_slot);
-      fstr.params.color = box->text_color;
-      fstr.params.size = M_1;
-      fstr.params.underline_thickness = 0;
-      fstr.params.strikethrough_thickness = 0;
-      dr_fstrs_push(scratch.arena, &fstrs, &fstr);
-      box->empty_fruns = dr_fruns_from_fstrs(ik_frame_arena(), box->tab_size, &fstrs);
-      empty_text_dim = box->empty_fruns.dim;
-    }
-
-    // fill
-    box->display_lines = lines;
-    box->display_line_fruns = line_fruns;
-    scratch_end(scratch);
   }
 
-  ////////////////////////////////
-  // Rendering
+  IK_EditBoxTextCache *cache = ik_edit_box_text_cache_from_box(box);
+  Assert(cache != 0);
 
-  TxtPt mouse_pt = {1, 1};
-  Rng2F32 mark_rect = {0};
-  Rng2F32 cursor_rect = {0};
-  Vec2F32 text_bounds = {0};
+  draw_data->mouse_pt = txt_pt(1, 1);
+  draw_data->selection_rng = is_focus_active ? txt_rng(*cursor, *mark) : (TxtRng){0};
+  draw_data->draw_carets = 0;
+
+  if(is_focus_active || box->string.size > 0)
+  {
+    box->text_bounds = cache->text_bounds;
+  }
+
   ProfScope("Rendering text")
   {
-    F32 best_mouse_offset = inf32();
-
-    F32 advance_x = 0;
-    F32 advance_y = 0;
-    // FIXME: box rect is always one frame behind, so the text rendered will be one frame off
-    //        we could use relative pos, then push a xform2d, too much work for now
-    F32 x = box_rect.p0.x + text_padding_x;
-    F32 y = box_rect.p0.y;
-    IK_TextAlign text_align = box->text_align;
-
-    // unpack lines
-    DR_FRunList *line_fruns = box->string.size > 0 ? box->display_line_fruns : &box->empty_fruns;
-    U64 line_count = box->string.size > 0 ? darray_size(box->display_line_fruns) : 1;
-    Vec2F32 text_dim = box->string.size > 0 ? total_text_dim : empty_text_dim;
-    text_dim.x *= font_size_scale;
-    text_dim.y *= font_size_scale;
-
-    // vertical align
-    if(text_align&IK_TextAlign_VCenter)
+    if(is_focus_active)
     {
-      y += (max_y-text_dim.y)/2.0;
-      y = ClampBot(box_rect.p0.y, y);
-    }
-    if(text_align&IK_TextAlign_Bottom)
-    {
-      y += (max_y-text_dim.y);
-    }
-
-    // unpack mark & cursor
-    mark_rect = (Rng2F32){x, y, x, box_rect.y1};
-    cursor_rect = (Rng2F32){x, y, x, box_rect.y1};
-    TxtRng selection_rng = is_focus_active ? txt_rng(*cursor, *mark) : (TxtRng){0};
-
-    U64 c_index = 0;
-    for(U64 line_index = 0; line_index < line_count; line_index++)
-    {
-      // one line
-      DR_FRunList *fruns = &line_fruns[line_index];
-      for(DR_FRunNode *n = fruns->first; n != 0; n = n->next)
+      F32 best_mouse_offset = inf32();
+      U64 line_count = darray_size(cache->text_lines);
+      if(line_count > 0)
       {
-        DR_FRun run = n->v;
-        Vec2F32 line_run_dim = scale_2f32(run.run.dim, font_size_scale);
-        text_bounds.x = Max(text_bounds.x, line_run_dim.x+text_padding_x*2);
-        text_bounds.y += line_run_dim.y;
+        IK_EditBoxTextLine *first_line = &cache->text_lines[0];
+        draw_data->mark_rect = shift_2f32((Rng2F32){first_line->local_rect.x0, first_line->local_rect.y0, first_line->local_rect.x0, first_line->local_rect.y1}, box_rect.p0);
+        draw_data->cursor_rect = draw_data->mark_rect;
+        draw_data->draw_carets = 1;
+      }
 
-        F32 line_x = x;
-        F32 line_y = y + run.run.ascent*font_size_scale;;
+      for(U64 line_index = 0; line_index < line_count; line_index += 1)
+      {
+        IK_EditBoxTextLine *line = &cache->text_lines[line_index];
+        Rng2F32 line_rect = shift_2f32(line->local_rect, box_rect.p0);
+        B32 mouse_in_line_bounds = ik_state->mouse_in_world.y > line_rect.y0 && ik_state->mouse_in_world.y < line_rect.y1;
+        Rng2F32 line_cursor = r2f32p(line_rect.x0, line_rect.y0, line_rect.x0, line_rect.y1);
 
-        // horizontal align
-        if(text_align&IK_TextAlign_HCenter)
+        U64 rect_opl = line->first_text_rect_index + line->text_rect_count;
+        for(U64 rect_idx = line->first_text_rect_index; rect_idx < rect_opl; rect_idx += 1)
         {
-          line_x += (max_x-line_run_dim.x)/2.0;
-          line_x = ClampBot(x, line_x);
-        }
-        if(text_align&IK_TextAlign_Right)
-        {
-          line_x += (max_x-line_run_dim.x);
-          line_x = ClampBot(x, line_x);
-        }
+          IK_EditBoxTextRect *text_rect = &cache->text_rects[rect_idx];
+          Rng2F32 parent_rect = shift_2f32(text_rect->parent_rect, box_rect.p0);
 
-        B32 mouse_in_line_bounds = ik_state->mouse_in_world.y > y && ik_state->mouse_in_world.y < (y+line_run_dim.y);
-        Rng2F32 line_cursor = {line_x,y,line_x,y+line_run_dim.y};
+          if(mark && mark->column == text_rect->column)
+          {
+            draw_data->mark_rect = line_cursor;
+          }
+          if(cursor && cursor->column == text_rect->column)
+          {
+            draw_data->cursor_rect = line_cursor;
+          }
 
-        FNT_Piece *piece_first = run.run.pieces.v;
-        FNT_Piece *piece_opl = run.run.pieces.v + run.run.pieces.count;
-        for(FNT_Piece *piece = piece_first; piece < piece_opl; piece++)
-        {
-          F32 this_advance_x = piece->advance*font_size_scale;
-          Rng2F32 src = r2f32p((F32)piece->subrect.x0, (F32)piece->subrect.y0, (F32)piece->subrect.x1, (F32)piece->subrect.y1);
-          Vec2F32 size = dim_2f32(src);
-          Rng2F32 dst = r2f32p(piece->offset.x*font_size_scale + line_x + advance_x,
-                               piece->offset.y*font_size_scale + line_y,
-                               (piece->offset.x+size.x)*font_size_scale + line_x + advance_x,
-                               (piece->offset.y+size.y)*font_size_scale + line_y);
-
-          // issue draw
-          B32 highlight = (c_index+1) >= selection_rng.min.column && (c_index+1) < selection_rng.max.column;
-          Rng2F32 parent_rect = {line_x+advance_x, y, line_x+advance_x+piece->advance*font_size_scale, y+line_run_dim.y};
-          IK_EditBoxTextRect text_rect = {parent_rect, dst, src, piece->texture, run.color, highlight};
-          darray_push(ik_frame_arena(), draw_data->text_rects, text_rect);
-
-          // cursor/mark on this glyph, set mark/cursor rect
-          if(mark && mark->column == (c_index+1))
-            mark_rect = line_cursor;
-          if(cursor && cursor->column == (c_index+1))
-            cursor_rect = line_cursor;
-
-          // update mouse_pt if it's closer
-          // Note(k): this won't work on empty line
           if(mouse_in_line_bounds)
           {
             F32 dist_to_mouse = length_2f32(sub_2f32(ik_state->mouse_in_world, center_2f32(parent_rect)));
             if(dist_to_mouse < best_mouse_offset)
             {
-              // TODO(k): if we are handling unicode, we want the utf-8 decode_size too
               best_mouse_offset = dist_to_mouse;
-              mouse_pt.column = abs_f32(ik_state->mouse_in_world.x-dst.x0) <= abs_f32(ik_state->mouse_in_world.x-dst.x0-this_advance_x) ? c_index+1 : c_index+piece->decode_size+1;
+              draw_data->mouse_pt.column = abs_f32(ik_state->mouse_in_world.x - parent_rect.x0) <= abs_f32(ik_state->mouse_in_world.x - parent_rect.x1) ? text_rect->column : text_rect->next_column;
             }
           }
 
-          advance_x += this_advance_x;
-          line_cursor.x1 += this_advance_x;
-          line_cursor.x0 += this_advance_x;
-
-          // advance c_index
-          c_index += piece->decode_size;
+          line_cursor.x0 = parent_rect.x1;
+          line_cursor.x1 = parent_rect.x1;
         }
 
-        // NOTE(k): cursor or mark is end of line
-        if(mark && mark->column == (c_index+1))     mark_rect = line_cursor;
-        if(cursor && cursor->column == (c_index+1)) cursor_rect = line_cursor;
-
-        // mouse is on empty line => mark mouse_pt (since we don't have any pieces to snap mouse)
-        if(mouse_in_line_bounds && run.run.pieces.count == 0)
+        if(mark && mark->column == line->column_end)
         {
-          mouse_pt.column = c_index+1;
+          draw_data->mark_rect = line_cursor;
         }
-
-        advance_x = 0;
-        // TODO(Next): font metrics has line_gap, we should be considering that
-        advance_y += line_run_dim.y;
-        y += line_run_dim.y;
+        if(cursor && cursor->column == line->column_end)
+        {
+          draw_data->cursor_rect = line_cursor;
+        }
+        if(mouse_in_line_bounds && line->text_rect_count == 0)
+        {
+          draw_data->mouse_pt.column = line->column_end;
+        }
       }
     }
-
-    // TODO(Next): fix it
-    // TODO: we should cache the result, since too many text can easily causing performance issues
-    if(is_focus_active)
-    {
-      draw_data->mark_rect = mark_rect;
-      draw_data->cursor_rect = cursor_rect;
-    }
   }
-
-  if(is_focus_active || box->string.size > 0) box->text_bounds = text_bounds;
 
   ////////////////////////////////
   // Interaction
@@ -3967,15 +4078,15 @@ IK_BOX_UPDATE(text)
   {
     if(ik_pressed(sig))
     {
-      *mark = mouse_pt;
+      *mark = draw_data->mouse_pt;
     }
-    *cursor = mouse_pt;
+    *cursor = draw_data->mouse_pt;
   }
 
   // focus active? -> set ime position to mouse pt
   if(is_focus_active)
   {
-    Vec2F32 pos = {cursor_rect.x0, cursor_rect.y1};
+    Vec2F32 pos = {draw_data->cursor_rect.x0, draw_data->cursor_rect.y1};
     pos = ik_screen_pos_from_world(pos);
     pos.x = Clamp(0, pos.x, ik_state->window_dim.x);
     pos.y = Clamp(0, pos.y, ik_state->window_dim.y);
@@ -4068,53 +4179,102 @@ IK_BOX_DRAW(text)
 {
   ProfBeginFunction();
   IK_EditBoxDrawData *draw_data = box->draw_data;
+  IK_EditBoxTextCache *cache = ik_edit_box_text_cache_from_box(box);
+
+  if(draw_data == 0 || cache == 0)
+  {
+    ProfEnd();
+    return;
+  }
+
+  Vec2F32 box_origin = ik_rect_from_box(box).p0;
 
   // FIXME: we should emit drawing if font is not visiable, less than 4 pixels?
 
   // draw text rects
-  for(U64 i = 0; i < darray_size(draw_data->text_rects); i++)
+  for(U64 i = 0; i < darray_size(cache->text_rects); i++)
   {
-    IK_EditBoxTextRect *text_rect = &draw_data->text_rects[i];
+    IK_EditBoxTextRect *text_rect = &cache->text_rects[i];
     // NOTE(k): we have \n run which is not renderable, and it will cutoff grouping continuation 
     if(!r_handle_match(r_handle_zero(), text_rect->tex))
     {
-      dr_img_keyed(text_rect->dst, text_rect->src, text_rect->tex, text_rect->color, 0,0,0, box->key_3f32);
+      dr_img_keyed(shift_2f32(text_rect->dst, box_origin), text_rect->src, text_rect->tex, text_rect->color, 0,0,0, box->key_3f32);
     }
-    // dr_rect(text_rect->dst, v4f32(1,0,0,0.5), 0,1,0);
+  }
 
-    if(text_rect->highlight)
+  if(!txt_pt_match(draw_data->selection_rng.min, draw_data->selection_rng.max))
+  {
+    for(U64 line_index = 0; line_index < darray_size(cache->text_lines); line_index += 1)
     {
-      dr_rect(text_rect->parent_rect, v4f32(0,0,1,0.2), 0, 0, 0);
+      IK_EditBoxTextLine *line = &cache->text_lines[line_index];
+      Rng2F32 highlight_rect = {0};
+      B32 has_highlight = 0;
+
+      U64 rect_opl = line->first_text_rect_index + line->text_rect_count;
+      for(U64 rect_idx = line->first_text_rect_index; rect_idx < rect_opl; rect_idx += 1)
+      {
+        IK_EditBoxTextRect *text_rect = &cache->text_rects[rect_idx];
+        B32 selected = text_rect->column < draw_data->selection_rng.max.column &&
+                       text_rect->next_column > draw_data->selection_rng.min.column;
+        if(selected)
+        {
+          Rng2F32 parent_rect = shift_2f32(text_rect->parent_rect, box_origin);
+          if(!has_highlight)
+          {
+            highlight_rect = parent_rect;
+            has_highlight = 1;
+          }
+          else
+          {
+            highlight_rect.x1 = parent_rect.x1;
+          }
+        }
+        else if(has_highlight)
+        {
+          break;
+        }
+      }
+
+      if(has_highlight)
+      {
+        dr_rect(highlight_rect, v4f32(0,0,1,0.2), 0, 0, 0);
+      }
     }
   }
 
   // draw mark & cursor
-  F32 line_height = draw_data->cursor_rect.y1-draw_data->cursor_rect.y0;
-  F32 cursor_thickness = line_height*0.05;
-  Rng2F32 cursor_rect = draw_data->cursor_rect;
-  Rng2F32 mark_rect = draw_data->mark_rect;
-  cursor_rect.x0 -= cursor_thickness;
-  cursor_rect.x1 += cursor_thickness;
-  mark_rect.x0 -= cursor_thickness;
-  mark_rect.x1 += cursor_thickness;
-
-  F32 cursor_thickness_px = cursor_thickness/ik_state->world_to_screen_ratio.x;
-  F32 corner_radius = cursor_thickness*0.5;
-  F32 border_thickness = 2.0*ik_state->world_to_screen_ratio.x; 
-  F32 softness = 1.0*ik_state->world_to_screen_ratio.x; 
-  Vec4F32 border_color = v4f32(1.0, 0,0,1);
-  B32 draw_border = (cursor_thickness_px) > 3.5;
-
-  // draw cursor
+  if(draw_data->draw_carets)
   {
-    dr_rect(cursor_rect, v4f32(0,0,1,1), corner_radius, 0, softness);
-    if(draw_border) dr_rect(cursor_rect, border_color, corner_radius, border_thickness, softness);
-  }
+    F32 line_height = draw_data->cursor_rect.y1-draw_data->cursor_rect.y0;
+    if(line_height > 0)
+    {
+      F32 cursor_thickness = line_height*0.05;
+      Rng2F32 cursor_rect = draw_data->cursor_rect;
+      Rng2F32 mark_rect = draw_data->mark_rect;
+      cursor_rect.x0 -= cursor_thickness;
+      cursor_rect.x1 += cursor_thickness;
+      mark_rect.x0 -= cursor_thickness;
+      mark_rect.x1 += cursor_thickness;
 
-  // draw mark
-  {
-    dr_rect(mark_rect, v4f32(0,1,0,1), corner_radius, 0, softness);
-    if(draw_border) dr_rect(mark_rect, border_color, corner_radius, border_thickness, softness);
+      F32 cursor_thickness_px = cursor_thickness/ik_state->world_to_screen_ratio.x;
+      F32 corner_radius = cursor_thickness*0.5;
+      F32 border_thickness = 2.0*ik_state->world_to_screen_ratio.x;
+      F32 softness = 1.0*ik_state->world_to_screen_ratio.x;
+      Vec4F32 border_color = v4f32(1.0, 0,0,1);
+      B32 draw_border = (cursor_thickness_px) > 3.5;
+
+      // draw cursor
+      {
+        dr_rect(cursor_rect, v4f32(0,0,1,1), corner_radius, 0, softness);
+        if(draw_border) dr_rect(cursor_rect, border_color, corner_radius, border_thickness, softness);
+      }
+
+      // draw mark
+      {
+        dr_rect(mark_rect, v4f32(0,1,0,1), corner_radius, 0, softness);
+        if(draw_border) dr_rect(mark_rect, border_color, corner_radius, border_thickness, softness);
+      }
+    }
   }
   ProfEnd();
 }
@@ -4911,6 +5071,8 @@ ik_box_action_slot_reset(IK_BoxAction *slot)
       }
     }
 
+    ik_edit_box_text_cache_release(box);
+
     // FIXME: if this action is delete, we remove the source box from the frame too
     IK_Frame *frame = box->frame;
     SLLStackPush_N(frame->first_free_box, box, free_next);
@@ -4937,6 +5099,11 @@ ik_box_action_capture(IK_Box *box)
     {
       IK_Box *captured = ik_box_alloc();
       MemoryCopy(captured, b, sizeof(IK_Box));
+      captured->display_lines = (String8List){0};
+      captured->display_line_fruns = 0;
+      captured->empty_fruns = (DR_FRunList){0};
+      captured->text_cache = 0;
+      captured->draw_data = 0;
       captured->capture_source = b;
 
       // deep copy string block
