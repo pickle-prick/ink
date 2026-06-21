@@ -2783,10 +2783,20 @@ ik_paste()
   // paste text
   if(content_is_text)
   {
-    IK_Box *box = ik_text(content, ik_state->mouse_in_world);
+    Temp scratch = scratch_begin(0,0);
+    // clean line break in windows, \r\n -> \n, we can't handle \r\n for now
+#if 0
+    String8List chunks = str8_split(scratch.arena, content, "\r\n", 2, StringSplitFlag_KeepEmpties);
+    String8 string = str8_list_join(scratch.arena, &chunks, &(StringJoin){str8_lit(""), str8_lit("\n"), str8_lit("")});
+#else
+  String8 string = ik_str8_lb_clean(scratch.arena, content);
+#endif
+
+    IK_Box *box = ik_text(string, ik_state->mouse_in_world);
     box->draw_frame_index = ik_state->frame_index+1;
     box->disabled_t = 1.0;
     pasted = 1;
+    scratch_end(scratch);
   }
 
   // paste image
@@ -6149,16 +6159,17 @@ ik_ui_selection(void)
 
     if(box == last_box)
     {
+      F32 eps = 1e-2 * ik_state->world_to_screen_ratio.x;
       box_rect.x0 += ik_state->animation.vast_rate*(target_box_rect.x0 - box_rect.x0);
       box_rect.y0 += ik_state->animation.slow_rate*(target_box_rect.y0 - box_rect.y0);
       box_rect.x1 += ik_state->animation.vast_rate*(target_box_rect.x1 - box_rect.x1);
       box_rect.y1 += ik_state->animation.slow_rate*(target_box_rect.y1 - box_rect.y1);
 
       B32 is_animating = 0;
-      is_animating = is_animating || abs_f32(box_rect.x0-target_box_rect.x0) > 0.01;
-      is_animating = is_animating || abs_f32(box_rect.y0-target_box_rect.y0) > 0.01;
-      is_animating = is_animating || abs_f32(box_rect.x1-target_box_rect.x1) > 0.01;
-      is_animating = is_animating || abs_f32(box_rect.y1-target_box_rect.y1) > 0.01;
+      is_animating = is_animating || abs_f32(box_rect.x0-target_box_rect.x0) > eps;
+      is_animating = is_animating || abs_f32(box_rect.y0-target_box_rect.y0) > eps;
+      is_animating = is_animating || abs_f32(box_rect.x1-target_box_rect.x1) > eps;
+      is_animating = is_animating || abs_f32(box_rect.y1-target_box_rect.y1) > eps;
       if(is_animating)
       {
         ik_request_frame();
@@ -8850,4 +8861,30 @@ internal int
 ik_box_cmp_y(IK_Box **left, IK_Box **right)
 {
   return (*left)->position.y - (*right)->position.y;
+}
+
+// string
+internal String8
+ik_str8_lb_clean(Arena *arena, String8 string)
+{
+  String8 ret = str8(push_array(arena, U8, string.size), 0);
+  U8 *first = string.str;
+  U8 *opl = first + string.size;
+  U8 *dst = ret.str;
+  for(U8 *c = first; c < opl; c++)
+  {
+    U8 *next = c+1;
+    B32 has_next = next < opl;
+    if(has_next && *c == '\r' && *next == '\n')
+    {
+      c++;
+      *(dst++) = '\n';
+    }
+    else
+    {
+      *(dst++) = *c;
+    }
+  }
+  ret.size = dst - ret.str;
+  return ret;
 }
