@@ -12,7 +12,7 @@
 #define OS_FEATURE_AUDIO                   0
 #define BUILD_VERSION_MAJOR                0
 #define BUILD_VERSION_MINOR                0
-#define BUILD_VERSION_PATCH                12
+#define BUILD_VERSION_PATCH                13
 #define BUILD_RELEASE_PHASE_STRING_LITERAL "ALPHA"
 #define BUILD_ISSUES_LINK_STRING_LITERAL   "https://github.com/pickle-prick/ink/issues"
 
