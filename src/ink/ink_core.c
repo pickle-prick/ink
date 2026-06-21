@@ -141,7 +141,7 @@ ik_ui_draw()
         // brighten
         {
           Vec4F32 color = hover_color;
-          color.w *= 0.15f;
+          color.w *= 0.05f;
           if(!is_hot)
           {
             color.w *= t;
@@ -641,8 +641,10 @@ ik_init(OS_Handle os_wnd, R_Handle r_wnd)
 #endif
 
   // Theme 
-  MemoryCopy(ik_state->cfg_theme_target.colors, ik_theme_preset_colors__handmade_hero, sizeof(ik_theme_preset_colors__handmade_hero));
-  MemoryCopy(ik_state->cfg_theme.colors, ik_theme_preset_colors__handmade_hero, sizeof(ik_theme_preset_colors__handmade_hero));
+  // MemoryCopy(ik_state->cfg_theme_target.colors, ik_theme_preset_colors__handmade_hero, sizeof(ik_theme_preset_colors__handmade_hero));
+  // MemoryCopy(ik_state->cfg_theme.colors, ik_theme_preset_colors__handmade_hero, sizeof(ik_theme_preset_colors__handmade_hero));
+  MemoryCopy(ik_state->cfg_theme_target.colors, ik_theme_preset_colors__four_coder, sizeof(ik_theme_preset_colors__four_coder));
+  MemoryCopy(ik_state->cfg_theme.colors, ik_theme_preset_colors__four_coder, sizeof(ik_theme_preset_colors__four_coder));
 
   //////////////////////////////
   //- k: compute palettes from theme
@@ -705,6 +707,14 @@ ik_init(OS_Handle os_wnd, R_Handle r_wnd)
     ik_state->cfg_ui_debug_palettes[IK_PaletteCode_DropSiteOverlay].text_weak    = current->colors[IK_ThemeColor_DropSiteOverlay];
     ik_state->cfg_ui_debug_palettes[IK_PaletteCode_DropSiteOverlay].border       = current->colors[IK_ThemeColor_DropSiteOverlay];
 
+    for(U64 i = 0; i < IK_PaletteCode_COUNT; i++)
+    {
+      for(U64 j = 0; j < UI_ColorCode_COUNT; j++)
+      {
+        ik_state->cfg_ui_debug_palettes[i].colors[j] = linear_from_srgba(ik_state->cfg_ui_debug_palettes[i].colors[j]);
+      }
+    }
+
     // main palette
     for EachEnumVal(IK_PaletteCode, code)
     {
@@ -760,6 +770,14 @@ ik_init(OS_Handle os_wnd, R_Handle r_wnd)
     ik_state->cfg_main_palettes[IK_PaletteCode_DropSiteOverlay].text         = current->colors[IK_ThemeColor_DropSiteOverlay];
     ik_state->cfg_main_palettes[IK_PaletteCode_DropSiteOverlay].text_weak    = current->colors[IK_ThemeColor_DropSiteOverlay];
     ik_state->cfg_main_palettes[IK_PaletteCode_DropSiteOverlay].border       = current->colors[IK_ThemeColor_DropSiteOverlay];
+
+    for(U64 i = 0; i < IK_PaletteCode_COUNT; i++)
+    {
+      for(U64 j = 0; j < IK_ColorCode_COUNT; j++)
+      {
+        ik_state->cfg_main_palettes[i].colors[j] = linear_from_srgba(ik_state->cfg_main_palettes[i].colors[j]);
+      }
+    }
   }
 
   IK_InitStacks(ik_state)
@@ -5962,13 +5980,14 @@ ik_ui_toolbar(void)
     UI_Row
     UI_Padding(ui_pct(1.0, 0.0))
     UI_Flags(UI_BoxFlag_DrawBorder|UI_BoxFlag_DrawDropShadow|UI_BoxFlag_DrawBackground)
-    UI_CornerRadius(2.0f)
     UI_PrefWidth(ui_px(cell_width*IK_ToolKind_COUNT, 1.0))
     UI_PrefHeight(ui_px(cell_width, 1.0))
     UI_ChildLayoutAxis(Axis2_X)
+    UI_CornerRadius(1.0f)
     inner = ui_build_box_from_stringf(0, "###inner");
 
   UI_Parent(inner)
+    UI_CornerRadius(1.0f)
   {
     String8 strs[IK_ToolKind_COUNT] =
     {
@@ -5981,48 +6000,54 @@ ik_ui_toolbar(void)
       str8_lit("&"),  // man
     };
 
+    UI_Palette *palette = ik_ui_palette_from_code(IK_PaletteCode_Base);
+    UI_Palette *palette_reverse = ik_ui_palette_from_code(IK_PaletteCode_NegativePopButton);
+
     for(U64 i = 0; i < IK_ToolKind_COUNT; i++)
     {
       UI_Box *b;
 
       UI_BoxFlags flags = UI_BoxFlag_DrawText|UI_BoxFlag_MouseClickable|UI_BoxFlag_DrawHotEffects|UI_BoxFlag_DrawActiveEffects|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawBorder;
       B32 is_active = ik_tool() == i;
+      F32 font_size = is_active ? ui_top_font_size()*1.1 : ui_top_font_size();
       if(is_active)
       {
-        ui_set_next_palette(ui_build_palette(ui_top_palette(),
-                                             .border = ik_rgba_from_theme_color(IK_ThemeColor_BaseBackground),
-                                             .background = ik_rgba_from_theme_color(IK_ThemeColor_Breakpoint)));
-        ui_set_next_font_size(ui_top_font_size()*1.3);
         flags |= UI_BoxFlag_DrawDropShadow;
       }
 
-      // icon
-      UI_PrefWidth(ui_px(cell_width, 1.0))
-        UI_PrefHeight(ui_px(cell_width, 1.0))
-        UI_Font(ik_font_from_slot(IK_FontSlot_IconsExtra))
-        UI_Flags(flags)
-        UI_TextAlignment(UI_TextAlign_Center)
-        b = ui_build_box_from_string(0, strs[i]);
-      UI_Signal sig = ui_signal_from_box(b);
-
-      // hot key indicator
-      UI_Parent(b)
-        UI_Flags(UI_BoxFlag_Floating|UI_BoxFlag_DisableTextTrunc|UI_BoxFlag_DrawText|UI_BoxFlag_DrawTextWeak)
-        UI_FixedPos(v2f32(0,-3))
-        UI_PrefWidth(ui_text_dim(0.0, 1.0))
-        UI_PrefHeight(ui_text_dim(0.0, 1.0))
-        UI_FontSize(ui_top_font_size()*0.7)
-        ui_build_box_from_stringf(0, "%I64u", i+1);
-
-      if(ui_pressed(sig))
+      // UI_Palette(ui_build_palette(ui_top_palette(), .border = border_color, .background = bg_clr, .text = txt_clr))
+      UI_Palette(is_active ? palette_reverse : palette)
+        UI_FontSize(font_size)
       {
-        switch(i)
+        // icon
+        UI_PrefWidth(ui_px(cell_width, 1.0))
+          UI_PrefHeight(ui_px(cell_width, 1.0))
+          UI_Font(ik_font_from_slot(IK_FontSlot_IconsExtra))
+          UI_Flags(flags)
+          UI_TextAlignment(UI_TextAlign_Center)
+          b = ui_build_box_from_string(0, strs[i]);
+        UI_Signal sig = ui_signal_from_box(b);
+
+        // hot key indicator
+        UI_Parent(b)
+          UI_Flags(UI_BoxFlag_Floating|UI_BoxFlag_DisableTextTrunc|UI_BoxFlag_DrawText)
+          UI_FixedPos(v2f32(0,-3))
+          UI_PrefWidth(ui_text_dim(0.0, 1.0))
+          UI_PrefHeight(ui_text_dim(0.0, 1.0))
+          UI_FontSize(ui_top_font_size()*0.7)
+          ui_build_box_from_stringf(0, "%I64u", i+1);
+
+        // signal
+        if(ui_pressed(sig))
         {
-          default: {ik_state->tool = i;}break;
-          case IK_ToolKind_Man:
+          switch(i)
           {
-            ik_state->show_man_page = !ik_state->show_man_page;
-          }break;
+            default: {ik_state->tool = i;}break;
+            case IK_ToolKind_Man:
+            {
+              ik_state->show_man_page = !ik_state->show_man_page;
+            }break;
+          }
         }
       }
     }
