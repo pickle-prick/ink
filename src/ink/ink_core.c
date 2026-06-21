@@ -2624,9 +2624,10 @@ internal void
 ik_selection_push(IK_Box *box)
 {
   IK_Box *select = ik_selection_box();
-  // FIXME: bug here, if child is already within a group, it can't be selected, it's parent should be selected
-  // FIXME: bug here, selection could be cleared, but all box selected are captured, but still point to select box
-  AssertAlways(box->parent == 0 && box->next == 0 && box->prev == 0);
+  // FIXME: if child is already within a group, it can't be selected, it's parent should be selected
+  // FIXME(@Bug): selection could be cleared, but all box selected are captured, but still point to select box
+  // FIXME(@Bug): this bug is caused by snapshot, snapshot will capture the parent, next, prev
+  // AssertAlways(box->parent == 0 && box->next == 0 && box->prev == 0);
   DLLPushFront(select->first, select->last, box);
   select->children_count++;
   box->parent = select;
@@ -3997,6 +3998,7 @@ IK_BOX_UPDATE(stroke)
 {
   IK_Signal sig = box->sig;
   B32 is_focus_active = ik_key_match(ik_state->focus_active_box_key, box->key);
+
   if(is_focus_active)
   {
     for(UI_EventNode *n = ik_state->events->first, *next = 0; n != 0; n = next)
@@ -4041,60 +4043,31 @@ IK_BOX_UPDATE(stroke)
   }
   if(is_focus_active)
   {
-    Vec2F32 last_position = box->last_point ? box->last_point->position : v2f32(-1,-1);
+    Vec2F32 last_position = box->last_point ? box->last_point->position : v2f32(-1000,-1000);
     Vec2F32 next_position = ik_state->mouse_in_world;
-    if(box->point_count < 3 || (last_position.x != next_position.x || last_position.y != next_position.y))
+
+    // Too small = jittery lines. Too large = blocky curves
+    F32 min_capture_dist = 2.f*ik_state->dpi/96.f * ik_state->world_to_screen_ratio.x;
+    F32 dist = length_2f32(sub_2f32(next_position, last_position));
+
+    if(box->point_count == 0 || dist > min_capture_dist)
     {
       // capture current point
-      {
-        IK_Point *p = ik_point_alloc();
-        DLLPushBack(box->first_point, box->last_point, p);
-        p->position = next_position;
-        box->point_count++;
-      }
+      IK_Point *p = ik_point_alloc();
+      DLLPushBack(box->first_point, box->last_point, p);
+      p->position = next_position;
+      box->point_count++;
 
-      // makeup to 3 points, we need at least 3 points to draw a bezer curve
-      if(box->point_count < 3)
-      {
-        U64 makeup = 3-box->point_count;
-        for(U64 i = 0; i < makeup; i++)
-        {
-          IK_Point *p = ik_point_alloc();
-          DLLPushBack(box->first_point, box->last_point, p);
-          p->position = next_position;
-          box->point_count++;
-        }
-      }
-      // purge redudant points
-      else
-      {
-        // e.g. points basically on a line, we can just save two endpoint in this case
-        IK_Point *p2 = box->last_point;
-        IK_Point *p1 = p2->prev;
-        IK_Point *p0 = p1 ? p1->prev : 0;
-        if(p0)
-        {
-          // area formed by p0p1 and p0p2, we don't need to divide it by 2, since we only compare with epsilon
-          F32 epsilon = 1e-2;
-          Vec2F32 p0p1 = sub_2f32(p1->position, p0->position);
-          Vec2F32 p0p2 = sub_2f32(p2->position, p0->position);
-          F32 area = abs_f32(p0p1.x*p0p2.y - p0p1.y*p0p2.x); // cross product
-          if(area < epsilon)
-          {
-            DLLRemove(box->first_point, box->last_point, p1);
-            box->point_count--;
-            ik_point_release(p1);
-          }
-        }
-      }
+      // FIXME: maybe we store pressure/velocity data here
     }
   }
 }
 
 IK_BOX_DRAW(stroke)
 {
+#if 0
   F32 base_stroke_size = box->stroke_size;
-  F32 min_visiable_stroke_size = (2*ik_state->dpi/96.f) * ik_state->world_to_screen_ratio.x;
+  F32 min_visiable_stroke_size = (4*ik_state->dpi/96.f) * ik_state->world_to_screen_ratio.x;
 
   IK_Point *p0 = box->first_point;
   IK_Point *p1 = p0 ? p0->next : 0;
@@ -4144,24 +4117,11 @@ IK_BOX_DRAW(stroke)
         };
 
         // draw line segment (prev → pt) with thickness
-#if 1
         if(length_2f32(sub_2f32(prev, pt)) > 1e-8)
         {
           dr_line_keyed(prev, pt, stroke_color, stroke_size, edge_softness, box->key_3f32);
         }
-#else
-        F32 half_stroke_size = stroke_size/2.0;
-        {
-          Vec2F32 pos = prev;
-          Rng2F32 rect = {pos.x-half_stroke_size, pos.y-half_stroke_size, pos.x+half_stroke_size, pos.y+half_stroke_size};
-          dr_rect(rect, stroke_color, half_stroke_size, 0, edge_softness);
-        }
-        {
-          Vec2F32 pos = pt;
-          Rng2F32 rect = {pos.x-half_stroke_size, pos.y-half_stroke_size, pos.x+half_stroke_size, pos.y+half_stroke_size};
-          dr_rect(rect, stroke_color, half_stroke_size, 0, edge_softness);
-        }
-#endif
+
         prev = pt;
       }
     }
@@ -4177,6 +4137,110 @@ IK_BOX_DRAW(stroke)
       last_point_drawn = 1;
     }
   }
+#else
+  F32 base_stroke_size = box->stroke_size;
+  F32 min_visiable_stroke_size = (4.5f * ik_state->dpi/96.f) * ik_state->world_to_screen_ratio.x;
+
+  Vec4F32 stroke_color = linear_from_srgba(box->stroke_color);
+  F32 edge_softness = (1.f*ik_state->dpi/96.f) * ik_state->world_to_screen_ratio.x;
+
+  IK_Point *p0 = box->first_point;
+  IK_Point *p1 = p0 ? p0->next : 0;
+  IK_Point *p2 = p1 ? p1->next : 0;
+
+  // We initialize current width to 0 to simulate a taper-in (touching paper)
+  F32 current_width = 0.0f; 
+  F32 velocity_filter = 0.0f; // Smoothed velocity
+
+  // Tweak these to change the "feel"
+  F32 thinning_factor = 0.9f; // How much it thins when fast (0.0 = no change, 0.9 = very thin)
+  F32 responsiveness = 0.6f;  // How fast thickness reacts to speed changes (0.1 = slow/smooth, 0.5 = twitchy)
+  F32 max_velocity = (8.0f*ik_state->dpi/96.f) * ik_state->world_to_screen_ratio.x; // Velocity cap for calculation
+
+  U64 point_index = 0;
+  while(p2)
+  {
+    // Midpoint subdivision (Standard Quadratic Bezier)
+    Vec2F32 m1 = {(p0->position.x+p1->position.x) * 0.5f, (p0->position.y+p1->position.y) * 0.5f};
+    Vec2F32 ctrl = p1->position;
+    Vec2F32 m2 = {(p1->position.x+p2->position.x) * 0.5f, (p1->position.y+p2->position.y) * 0.5f};
+
+    // Calculate Stroke Width Physics
+    {
+      F32 dist = length_2f32(sub_2f32(p0->position, p1->position));
+
+      // Normalize velocity (0.0 to 1.0)
+      F32 velocity = Clamp(0, dist, max_velocity) / max_velocity;
+
+      // Smooth the velocity to prevent lumps (0.0 to 1.0)
+      velocity_filter = velocity_filter * (1.0f - responsiveness) + velocity * responsiveness;
+
+      // Ink Logic: Faster = Thinner
+      F32 target_width = base_stroke_size * (1.0f - (velocity_filter * thinning_factor));
+
+      // Taper Logic: Force start to be thin
+      // if(point_index < 2)
+      // {
+      //   target_width *= ((F32)point_index / 2.0f);
+      // }
+
+      // Smooth the width transition
+      current_width = current_width * (1.0f - responsiveness) + target_width * responsiveness;
+      current_width = Max(current_width, min_visiable_stroke_size);
+    }
+
+    // Draw the Curve Segment
+    {
+      Vec2F32 b_p0 = m1;
+      Vec2F32 b_p1 = ctrl;
+      Vec2F32 b_p2 = m2;
+
+      // Dynamic step count based on length and curvature makes it smoother
+      F32 seg_len = length_2f32(sub_2f32(b_p0, b_p2));
+      F32 curvature = length_2f32(sub_2f32(scale_2f32(add_2f32(b_p0, b_p2), 0.5f), b_p1));
+
+      // More steps if long or very curved
+      U64 steps = (U64)((seg_len + curvature * 2.0f) / (2.0f * ik_state->world_to_screen_ratio.x)); 
+      steps = Clamp(4, steps, 60);
+
+      Vec2F32 prev = b_p0;
+
+      // We calculate a per-sub-segment width lerp if we want it really smooth, 
+      // but for dr_line_keyed, constant width per Bezier segment is usually okay.
+      // If you see "stepping" in thickness, we can lerp width inside this loop too.
+      F32 segment_width = current_width; 
+
+      for(U64 i = 1; i <= steps; i++)
+      {
+        F32 t = (F32)i / (F32)steps;
+        F32 u = 1.0f - t;
+
+        Vec2F32 pt = {
+          u*u*b_p0.x + 2*u*t*b_p1.x + t*t*b_p2.x,
+          u*u*b_p0.y + 2*u*t*b_p1.y + t*t*b_p2.y
+        };
+
+        dr_line_keyed(prev, pt, stroke_color, segment_width, edge_softness, box->key_3f32);
+        prev = pt;
+      }
+    }
+
+    // Advance
+    p0 = p1;
+    p1 = p2;
+    p2 = p2->next;
+    point_index++;
+
+    // Handle the very last segment
+    if(!p2)
+    {
+      // Simply draw a line to the final real point
+      // Ideally we taper this out too
+      // FIXME: this is too small
+      dr_line_keyed(m2, p1->position, stroke_color, min_visiable_stroke_size, edge_softness, box->key_3f32);
+    }
+  }
+#endif
 }
 
 internal IK_Box *
@@ -6856,6 +6920,8 @@ ik_ui_inspector(void)
             }
 
             // delete
+#if 0
+            // FIXME(@Bug)
             ui_spacer(ui_em(0.2, 1.0));
             UI_PrefWidth(ui_text_dim(0.f, 0.f))
             UI_TextAlignment(UI_TextAlign_Center)
@@ -6874,6 +6940,7 @@ ik_ui_inspector(void)
               }
               else ik_box_captured_release(b);
             }
+#endif
           }
         }
       }
