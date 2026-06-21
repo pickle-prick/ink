@@ -4084,8 +4084,25 @@ IK_BOX_DRAW(text)
   cursor_rect.x1 += cursor_thickness;
   mark_rect.x0 -= cursor_thickness;
   mark_rect.x1 += cursor_thickness;
-  dr_rect(cursor_rect, v4f32(0,0,1,0.5), cursor_thickness, 0, 1.0*ik_state->world_to_screen_ratio.x);
-  dr_rect(mark_rect, v4f32(0,1,0,0.5), cursor_thickness, 0, 1.0*ik_state->world_to_screen_ratio.x);
+
+  F32 cursor_thickness_px = cursor_thickness/ik_state->world_to_screen_ratio.x;
+  F32 corner_radius = cursor_thickness*0.5;
+  F32 border_thickness = 2.0*ik_state->world_to_screen_ratio.x; 
+  F32 softness = 1.0*ik_state->world_to_screen_ratio.x; 
+  Vec4F32 border_color = v4f32(1.0, 0,0,1);
+  B32 draw_border = (cursor_thickness_px) > 3.5;
+
+  // draw cursor
+  {
+    dr_rect(cursor_rect, v4f32(0,0,1,1), corner_radius, 0, softness);
+    if(draw_border) dr_rect(pad_2f32(cursor_rect,4.f), border_color, corner_radius, border_thickness, softness);
+  }
+
+  // draw mark
+  {
+    dr_rect(mark_rect, v4f32(0,1,0,1), corner_radius, 0, softness);
+    if(draw_border) dr_rect(pad_2f32(mark_rect,4.f), border_color, corner_radius, border_thickness, softness);
+  }
 }
 
 internal IK_Box *
