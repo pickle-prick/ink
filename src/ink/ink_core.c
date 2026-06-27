@@ -2471,11 +2471,33 @@ ik_frame(void)
     // draw focus hot overlay
     if(ik_tool() == IK_ToolKind_Selection)
     {
-      IK_Box *b = ik_box_from_key(ik_state->focus_hot_box_key[IK_MouseButtonKind_Left]);
-      if(b)
+      // Draw focus hot overlay
       {
-        Rng2F32 dst = ik_rect_from_box(b);
-        ik_dr_rect_keyed(dst, v4f32(0,0,0,0), 0, 0, 0, b->key_3f32);
+        IK_Box *box = ik_box_from_key(ik_state->focus_hot_box_key[IK_MouseButtonKind_Left]);
+        if(box)
+        {
+          Rng2F32 dst = ik_rect_from_box(box);
+          // ik_dr_rect_keyed(dst, v4f32(0,0,0,0), 0, 0, 0, b->key_3f32);
+          ik_dr_rect(dst, v4f32(0,0,0,0), 0, 0, 0);
+        }
+      }
+
+      // Draw hot overlay
+      {
+        IK_Box *box = ik_box_from_key(ik_state->hot_box_key);
+        if(box && box != ik_blank_box())
+        {
+          Rng2F32 dst = ik_rect_from_box(box);
+          F32 border_thickness = 6.0f*ik_stw();
+          F32 edge_softness = 1.0*ik_stw();
+          F32 corner_radius = 1.0*ik_stw();
+          Vec4F32 border_color = linear_from_srgba(v4f32(0.9f, 0.9f, 0.3f, 1.f));
+          border_color.w = box->hot_t;
+
+          ik_dr_rect(dst, border_color, corner_radius, border_thickness, edge_softness);
+          ik_dr_rect(pad_2f32(dst, border_thickness*0.5f), v4f32(0.1,0.1,0.1,1.0), corner_radius, 1.0f*ik_stw(), edge_softness); // outer
+          ik_dr_rect(pad_2f32(dst, -border_thickness*0.5f), v4f32(0.1,0.1,0.1,1.0), 0.0f, 1.0f*ik_stw(), edge_softness);
+        }
       }
     }
 

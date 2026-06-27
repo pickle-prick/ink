@@ -809,9 +809,8 @@ struct IK_State
   // camera
   Mat4x4F32             proj_mat;
   Mat4x4F32             proj_mat_inv;
-  // FIXME: we should probably renaming these, it's confusing
-  F32                   screen_to_world_factor;
-  F32                   world_to_screen_factor;
+  F32                   screen_to_world_factor; // stw
+  F32                   world_to_screen_factor; // wts
 
   // mouse
   Vec2F32               mouse;
@@ -961,6 +960,8 @@ internal B32          ik_frame(void);
 internal Arena*       ik_frame_arena(void);
 internal IK_DrawList* ik_frame_drawlist(void);
 internal void         ik_request_frame(void);
+#define ik_stw() (ik_state->screen_to_world_factor)
+#define ik_wts() (ik_state->world_to_screen_factor)
 
 //- editor
 internal IK_ToolKind ik_tool(void);
@@ -996,6 +997,7 @@ internal void ik_selection_push(IK_Box *box);
 internal void ik_selection_commit();
 
 #define ik_selection_box() (ik_top_frame()->select)
+#define ik_blank_box() (ik_top_frame()->blank)
 
 /////////////////////////////////
 //~ Clipboard Functions
