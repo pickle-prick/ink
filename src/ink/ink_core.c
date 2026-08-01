@@ -51,6 +51,7 @@ return old_value;
 #define MAX_ZOOM_FACTOR 30.f // Zoom in
 #define MIN_ZOOM_FACTOR 0.1f // Zoom out
 #define CANVAS_SIZE     ((MAX_JITTER * 8388608.f) / MAX_ZOOM_FACTOR)
+#define ULP             (CANVAS_SIZE*0.00000005960464f) // W * 2^-24  
 
 // TODO(Next): maybe we could use metagen
 // Color palette
@@ -861,6 +862,7 @@ ik_frame(void)
   dr_begin_frame();
   ik_state->bucket_ui = dr_bucket_make();
   ik_state->bucket_main = dr_bucket_make();
+  ik_state->bucket_main_foreground = dr_bucket_make();
 
   /////////////////////////////////
   //~ Get events from os
@@ -1427,6 +1429,8 @@ ik_frame(void)
   ik_state->mouse_delta_in_world.x = ik_state->mouse_delta.x*ik_state->screen_to_world_factor;
   ik_state->mouse_delta_in_world.y = ik_state->mouse_delta.y*ik_state->screen_to_world_factor;
 
+  frame->quadtree[0] = quadtree_push(ik_frame_arena(), ik_rect_from_camera_pos_zoom(camera->position, camera->zoom_factor));
+
   ////////////////////////////////
   //~ Main scene building
 
@@ -1519,7 +1523,7 @@ ik_frame(void)
         }
 
         ////////////////////////////////
-        // calc size in place
+        // Calc size in place
 
         if(box->flags&IK_BoxFlag_FitViewport)
         {
@@ -1565,7 +1569,7 @@ ik_frame(void)
         }
 
         ////////////////////////////////
-        // dragging -> reposition
+        // Dragging -> Reposition (Optional Snapping)
 
         // TODO(Next): IK_BoxFlag_DragToPosition and IK_BoxFlag_FitChildren are in conflict
 
@@ -1575,14 +1579,14 @@ ik_frame(void)
         {
           if(box->sig.f & IK_SignalFlag_Pressed)
           {
-            IK_BoxDrag drag = {ik_rect_from_box(box), ik_state->mouse, ik_state->mouse_in_world, 0};
+            IK_BoxDrag drag = {box->rect, ik_state->mouse, ik_state->mouse_in_world, 0};
             ik_store_drag_struct(&drag);
             ik_state->action_slot = IK_ActionSlot_Center;
           }
           else if(ik_state->action_slot == IK_ActionSlot_Center)
           {
             IK_BoxDrag drag = *ik_get_drag_struct(IK_BoxDrag);
-            // NOTE(k): camera rect could be animating, casuing world mouse delta change even mouse in screen didn't change
+            // NOTE(k): Camera rect could be animating, casuing world mouse delta change even mouse in screen didn't change
             F32 epsilon = (ik_state->dpi/96.f)*2.f;
             F32 drag_px = length_2f32(sub_2f32(drag.drag_start_mouse, ik_state->mouse));
             if(drag.drag_started || drag_px > epsilon)
@@ -1593,18 +1597,161 @@ ik_frame(void)
                 drag.drag_started = 1;
                 ik_store_drag_struct(&drag);
               }
+
+              // Compute base drag delta
               Vec2F32 delta = sub_2f32(ik_state->mouse_in_world, drag.drag_start_mouse_in_world);
-              Vec2F32 position = add_2f32(drag.drag_start_rect.p0, delta);
-              Vec2F32 position_delta = sub_2f32(position, box->position);
+              Vec2F32 next_position = add_2f32(drag.drag_start_rect.p0, delta);
+              Vec2F32 position_delta = sub_2f32(next_position, box->position);
+
+              // Do snapping if we could
+#if 0
+              if(frame->quadtree[1])
+              {
+                Rng2F32 rect = {next_position.x, next_position.y, next_position.x+box->rect_size.x, next_position.y+box->rect_size.y};
+                Rng2F32 camera_rect = ik_rect_from_camera_pos_zoom(camera->position, camera->zoom_factor);
+                F32 half_hit_size = 4.0f * ik_stw() * 0.5f;
+
+                Rng2F32 hit_rects[Dir2_COUNT] = 
+                {
+                  {rect.x0-half_hit_size, camera_rect.y0, rect.x0+half_hit_size, camera_rect.y1}, // Left -> x0
+                  {camera_rect.x0, rect.y0-half_hit_size, camera_rect.x1, rect.y0+half_hit_size}, // Up -> y0
+                  {rect.x1-half_hit_size, camera_rect.y0, rect.x1+half_hit_size, camera_rect.y1}, // Right -> x1
+                  {camera_rect.x0, rect.y1-half_hit_size, camera_rect.x1, rect.y1+half_hit_size}, // Down -> y1
+                };
+
+                typedef struct Edge Edge;
+                struct Edge
+                {
+                  F32 dst_value;
+
+                  struct
+                  {
+                    Dir2 direction;
+                    F32 value;
+                    F32 distance;
+                  } closest_src;
+                };
+
+                Edge edges[Dir2_COUNT] = 
+                {
+                  { rect.x0, {Dir2_Invalid, 0.0f, inf32()} },
+                  { rect.y0, {Dir2_Invalid, 0.0f, inf32()} },
+                  { rect.x1, {Dir2_Invalid, 0.0f, inf32()} },
+                  { rect.y1, {Dir2_Invalid, 0.0f, inf32()} }
+                };
+
+                for(int direction = Dir2_Left; direction < Dir2_COUNT; ++direction)
+                {
+                  IK_Box **neighbors = 0;
+                  quadtree_query(ik_frame_arena(), frame->quadtree[1], hit_rects[direction], (void***)&neighbors);
+
+                  Edge *edge = &edges[direction];
+
+                  for(U64 neighbor_index = 0; neighbor_index < darray_size(neighbors); ++neighbor_index)
+                  {
+                    IK_Box *neighbor = neighbors[neighbor_index];
+                    if(neighbor == box) continue;
+                    Rng2F32 neighbor_rect = neighbor->rect;
+
+                    // NOTE(@k): for the same axis, we need to compare both sides
+                    for(int i = 0; i < 2; ++i)
+                    {
+                      int src_direction = (direction+i*2)%4;
+                      F32 distance = abs_f32(edge->dst_value - neighbor_rect.float4[src_direction]);
+                      if(distance < edge->closest_src.distance)
+                      {
+                        edge->closest_src.direction = src_direction;
+                        edge->closest_src.value = neighbor_rect.float4[src_direction];
+                        edge->closest_src.distance = distance;
+                      }
+                    }
+                  }
+                }
+
+                F32 threshold = 14.0f * ik_stw();
+                for(int direction = Dir2_Left; direction < Dir2_COUNT; ++direction)
+                {
+                  Edge *edge = &edges[direction];
+                  Edge *next_aligned_edge = &edges[(direction+2)%4];
+                  if(edge->closest_src.distance < inf32())
+                  {
+                    F32 closest_value = edge->closest_src.value;
+                    if(edge->closest_src.distance <= threshold &&
+                       (edge->closest_src.distance <= next_aligned_edge->closest_src.distance || abs_f32(edge->closest_src.distance - next_aligned_edge->closest_src.distance) < 0.1*ik_stw()))
+                    {
+                      // Snapping position
+                      int axis = (direction)%2;
+                      F32 delta = closest_value - rect.float4[direction];
+                      position_delta.v[axis] = next_position.v[axis]+delta-box->position.v[axis];
+
+                      // Draw edge hint
+                      DR_BucketScope(ik_state->bucket_main_foreground)
+                      {
+                        F32 half_hint_thickness = 2.0f * ik_stw() * 0.5;
+                        Rng2F32 hint_rect = camera_rect;
+                        if(direction < 2)
+                        {
+                          hint_rect.float4[direction] = closest_value - half_hint_thickness;
+                          hint_rect.float4[(direction+2)%4] = closest_value + half_hint_thickness;
+                        }
+                        else
+                        {
+                          hint_rect.float4[direction] = closest_value + half_hint_thickness;
+                          hint_rect.float4[(direction+2)%4] = closest_value - half_hint_thickness;
+                        }
+
+                        Vec4F32 color = linear_from_srgba(rgba_from_u32(0xF9F1A5FF));
+                        dr_rect(hint_rect, color, 0,0,1.0*ik_stw());
+                      }
+                    }
+                  }
+                }
+              }
+#else
+              Rng2F32 rect = {next_position.x, next_position.y, next_position.x+box->rect_size.x, next_position.y+box->rect_size.y};
+              IK_SnapResult snap_results[Dir2_COUNT] = {0};
+              for(int direction = Dir2_Left; direction < Dir2_COUNT; ++direction)
+              {
+                snap_results[direction] = ik_snapped_from_box_rect(rect, direction, box);
+              }
+              for(int direction = Dir2_Left; direction < Dir2_COUNT; ++direction)
+              {
+                Dir2 next_aligned_direction = (direction+2)%4;
+                IK_SnapResult snap_result = snap_results[direction];
+                IK_SnapResult next_aligned_snap_result = snap_results[next_aligned_direction];
+
+                if(snap_result.snapped && ((!next_aligned_snap_result.snapped) || (snap_result.distance <= next_aligned_snap_result.distance || abs_f32(snap_result.distance-next_aligned_snap_result.distance) < ULP)))
+                {
+                  int axis = (direction)%2;
+                  F32 delta = snap_result.value - rect.float4[direction];
+                  position_delta.v[axis] = next_position.v[axis]+delta-box->position.v[axis];
+
+                  // Draw edge hint
+                  DR_BucketScope(ik_state->bucket_main_foreground)
+                  {
+                    F32 half_hint_thickness = 2.0f * ik_stw() * 0.5;
+                    Rng2F32 hint_rect = ik_camera_rect();
+                    F32 sign = direction < 2 ? 1.0f : -1.0f;
+
+                    hint_rect.float4[direction] = snap_result.value - sign*half_hint_thickness;
+                    hint_rect.float4[(direction+2)%4] = snap_result.value + sign*half_hint_thickness;
+
+                    Vec4F32 color = linear_from_srgba(rgba_from_u32(0xF9F1A5FF));
+                    dr_rect(hint_rect, color, 0,0,1.0*ik_stw());
+                  }
+                }
+              }
+#endif
+
               ik_box_do_translate(box, position_delta);
             }
           }
         }
 
         ////////////////////////////////
-        // we can now compute box rect & calc ratio
+        // Compute box rect & calc ratio
 
-        Rng2F32 rect = ik_rect_from_box(box);
+        Rng2F32 rect = box->rect = ik_rect_from_box(box);
 
         if(!(box->flags&IK_BoxFlag_FixedRatio))
         {
@@ -1612,8 +1759,21 @@ ik_frame(void)
           if(box->rect_size.x != 0 && box->rect_size.y != 0) box->ratio = box->rect_size.x/box->rect_size.y;
         }
 
+        // Insert into camera viewport quadtree
+        if(rect.x0 != rect.x1 && rect.y0 != rect.y1)
+        {
+          Rng2F32 camera_rect = ik_rect_from_camera_pos_zoom(camera->position, camera->zoom_factor);
+          Rng2F32 sub_rect = intersect_2f32(camera_rect, rect);
+          if(sub_rect.x0 > sub_rect.x1) Swap(F32, sub_rect.x0, sub_rect.x1);
+          if(sub_rect.y0 > sub_rect.y1) Swap(F32, sub_rect.y0, sub_rect.y1);
+          if(sub_rect.x0 != sub_rect.x1 && sub_rect.y0 != sub_rect.y1)
+          {
+            quadtree_insert(ik_frame_arena(), frame->quadtree[0], sub_rect, box);
+          }
+        }
+
         ////////////////////////////////
-        // double clicked? -> set camera focus
+        // Double clicked? -> set camera focus
 
         if(box->flags&IK_BoxFlag_DoubleClickToCenter && box->sig.f&IK_SignalFlag_DoubleClicked)
         {
@@ -1628,7 +1788,7 @@ ik_frame(void)
         }
 
         ////////////////////////////////
-        // push to global selection list if box is selected
+        // Push to global selection list if box is selected
 
         if(box->sig.f&IK_SignalFlag_Select && box != frame->blank)
         {
@@ -1711,7 +1871,7 @@ ik_frame(void)
     }
 
     ////////////////////////////////
-    //~ Second pass to calculate downwards-dependent size 
+    //~ Second pass to calculate downwards-dependent size
 
     for(U64 i = 0; i < ArrayCount(roots); i++)
     {
@@ -1726,7 +1886,7 @@ ik_frame(void)
           Rng2F32 bounds = {inf32(), inf32(), neg_inf32(), neg_inf32()};
           for(IK_Box *child = box->first; child != 0; child = child->next)
           {
-            Rng2F32 rect = ik_rect_from_box(child);
+            Rng2F32 rect = child->rect;
             bounds.x0 = Min(rect.x0, bounds.x0);
             bounds.x1 = Max(rect.x1, bounds.x1);
             bounds.y0 = Min(rect.y0, bounds.y0);
@@ -1736,6 +1896,7 @@ ik_frame(void)
           box->rect_size = dim_2f32(bounds);
           AssertAlways(box->rect_size.y != 0);
           box->ratio = box->rect_size.x/box->rect_size.y;
+          box->rect = ik_rect_from_box(box);
         }
       }
     }
@@ -2081,7 +2242,7 @@ ik_frame(void)
 
       IK_BoxDrag drag =
       {
-        .drag_start_rect = ik_rect_from_box(box),
+        .drag_start_rect = box->rect,
         .drag_start_mouse = ik_state->mouse,
         .drag_start_mouse_in_world = ik_state->mouse_in_world,
       };
@@ -2322,7 +2483,7 @@ ik_frame(void)
         next = box->list_next;
         if(ik_state->frame_index >= box->draw_frame_index && !(box->flags&IK_BoxFlag_Deleted))
         {
-          Rng2F32 dst = ik_rect_from_box(box);
+          Rng2F32 dst = box->rect;
           Vec2F32 center = center_2f32(dst);
           dst.p0 = mix_2f32(center, dst.p0, 1.0-box->disabled_t);
           dst.p1 = mix_2f32(center, dst.p1, 1.0-box->disabled_t);
@@ -2476,7 +2637,7 @@ ik_frame(void)
         IK_Box *box = ik_box_from_key(ik_state->focus_hot_box_key[IK_MouseButtonKind_Left]);
         if(box)
         {
-          Rng2F32 dst = ik_rect_from_box(box);
+          Rng2F32 dst = box->rect;
           // ik_dr_rect_keyed(dst, v4f32(0,0,0,0), 0, 0, 0, b->key_3f32);
           ik_dr_rect(dst, v4f32(0,0,0,0), 0, 0, 0);
         }
@@ -2487,7 +2648,7 @@ ik_frame(void)
         IK_Box *box = ik_box_from_key(ik_state->hot_box_key);
         if(box && box != ik_blank_box())
         {
-          Rng2F32 dst = ik_rect_from_box(box);
+          Rng2F32 dst = box->rect;
           F32 border_thickness = 6.0f*ik_stw();
           F32 edge_softness = 1.0*ik_stw();
           F32 corner_radius = 1.0*ik_stw();
@@ -2500,6 +2661,8 @@ ik_frame(void)
         }
       }
     }
+
+    dr_sub_bucket(ik_state->bucket_main_foreground);
 
     dr_pop_viewport();
     dr_pop_xform2d();
@@ -2529,7 +2692,9 @@ ik_frame(void)
   /////////////////////////////////
   //~ End of frame
 
-  // end drag/drop if needed (no code handled drop)
+  Swap(QuadTree*, frame->quadtree[0], frame->quadtree[1]);
+
+  // End drag/drop if needed (no code handled drop)
   if(ik_state->drag_drop_state == IK_DragDropState_Dropping)
   {
     ik_state->drag_drop_state = IK_DragDropState_Null;
@@ -2663,6 +2828,15 @@ internal void
 ik_request_frame()
 {
   ik_state->num_frames_requested = 4;
+}
+
+internal Rng2F32
+ik_camera_rect()
+{
+  IK_Frame *frame = ik_top_frame();
+  IK_Camera *camera = &frame->camera;
+  Rng2F32 ret = ik_rect_from_camera_pos_zoom(camera->position, camera->zoom_factor);
+  return ret;
 }
 
 // editor
@@ -2900,7 +3074,7 @@ ik_paste()
     scratch_end(scratch);
   }
 
-  // paste image
+  // Paste image
   if(content_is_image)
   {
     // decide initial width&height
@@ -2935,7 +3109,7 @@ ik_paste()
     pasted = 1;
   }
 
-  // paste box
+  // Paste box
   if(!pasted && !ik_key_match(ik_key_zero(), ik_state->last_box_key_copied))
   {
     IK_Box *src = ik_box_from_key(ik_state->last_box_key_copied);
@@ -2960,7 +3134,7 @@ ik_paste()
 
       }
 
-      // capture
+      // Capture
       {
         IK_BoxAction *action = ik_box_action_capture(root);
         for(IK_Box *b = action->first_captured; b != 0; b = b->capture_next)
@@ -3763,11 +3937,11 @@ IK_BOX_UPDATE(text)
     scratch_end(scratch);
   }
 
-  // unpack box rect
-  Rng2F32 box_rect = ik_rect_from_box(box);
-  Vec2F32 box_dim = dim_2f32(box_rect);
+  // Unpack box rect
+  Rng2F32 box_rect = box->rect;
+  Vec2F32 box_dim = box->rect_size;
 
-  // unpack font params
+  // Unpack font params
   F32 font_size = box->font_size;
   F32 font_size_scale = font_size / (F32)M_1;
   F32 text_padding_x = box->text_padding*font_size_scale;
@@ -3783,7 +3957,7 @@ IK_BOX_UPDATE(text)
   {
     Temp scratch = scratch_begin(0,0);
 
-    // push line runs
+    // Push line runs
     char *by = "\n";
     ProfBegin("Split lines");
     String8List lines = str8_split(ik_frame_arena(), box->string, (U8*)by, 1, StringSplitFlag_KeepEmpties);
@@ -4853,6 +5027,14 @@ ik_box_do_scale(IK_Box *box, Vec2F32 scale, Vec2F32 origin)
 {
   if(!(box->flags&IK_BoxFlag_Transparent))
   {
+    B32 keep_ratio = !!(box->flags&(IK_BoxFlag_FixedRatio|IK_BoxFlag_FitChildren));
+    if(keep_ratio)
+    {
+      Assert(abs_f32(scale.x-scale.y) <= 0.001f);
+      // NOTE(@k): Preventing floating number drifting
+      scale.x = scale.y;
+    }
+
     // rect size
     if(box->flags & IK_BoxFlag_DragToScaleRectSize)
     {
@@ -5341,7 +5523,7 @@ ik_signal_from_box(IK_Box *box)
   IK_Signal sig = {0};
   sig.box = box;
   sig.event_flags |= os_get_modifiers();
-  Rng2F32 rect = ik_rect_from_box(box);
+  Rng2F32 rect = box->rect;
   B32 pixel_hot = ik_key_match(box->key, ik_state->pixel_hot_key);
 
   /////////////////////////////////
@@ -6296,7 +6478,7 @@ ik_ui_selection(void)
     /////////////////////////////////
     // world pos to screen
 
-    Rng2F32 target_box_rect = ik_rect_from_box(box);
+    Rng2F32 target_box_rect = box->rect;
     local_persist Rng2F32 box_rect = {0};
 
     // first box drawn after reset? -> set origin
@@ -6382,7 +6564,8 @@ ik_ui_selection(void)
       F32 corner_thickness = dpi_scale*2.25;
       F32 edge_thickness = corner_thickness;
       F32 edge_length = dpi_scale*14;
-      // top left
+
+      // Top Left
       {
         // anchor
         UI_Signal sig1;
@@ -6430,7 +6613,7 @@ ik_ui_selection(void)
             {
               IK_BoxDrag drag =
               {
-                .drag_start_rect = ik_rect_from_box(box),
+                .drag_start_rect = box->rect,
                 .drag_start_mouse = ik_state->mouse,
                 .drag_start_mouse_in_world = ik_state->mouse_in_world,
                 .drag_started = 0,
@@ -6477,6 +6660,12 @@ ik_ui_selection(void)
                   ui_store_drag_struct(&drag);
                 }
                 Vec2F32 pivot = {box->position.x+box->rect_size.x, box->position.y+box->rect_size.y};
+
+                // Snapping
+                {
+                  // Rng2F32 rect_after_scale = {b->position.x, b->position.y, b->position.x+b->rect_size.x, b->position.y+b->rect_size.y};
+                }
+
                 ik_box_do_scale(box, scale_delta, pivot);
               }
             }
@@ -6489,7 +6678,7 @@ ik_ui_selection(void)
         }
       }
 
-      // bottom right
+      // Bottom Right
       {
         Vec2F32 origin = {rect_dim.x, rect_dim.y};
         // anchor
@@ -6550,7 +6739,7 @@ ik_ui_selection(void)
             {
               IK_BoxDrag drag =
               {
-                .drag_start_rect = ik_rect_from_box(box),
+                .drag_start_rect = box->rect,
                 .drag_start_mouse = ik_state->mouse,
                 .drag_start_mouse_in_world = ik_state->mouse_in_world,
                 .drag_started = 0,
@@ -6597,6 +6786,55 @@ ik_ui_selection(void)
                   drag.drag_started = 1;
                   ui_store_drag_struct(&drag);
                 }
+
+                // Snapping
+                {
+                  Vec2F32 rect_size_after_scale = new_rect_size;
+                  Rng2F32 rect_after_scale = new_rect;
+
+                  IK_SnapResult snap_results[Axis2_COUNT] = {0};
+                  for(Axis2 axis = Axis2_X; axis < DirH_COUNT; ++axis)
+                  {
+                    // Right or Down
+                    Dir2 direction = axis + 2;
+                    snap_results[axis] = ik_snapped_from_box_rect(rect_after_scale, direction, box);
+                  }
+
+                  for(Axis2 axis = Axis2_X; axis < DirH_COUNT; ++axis)
+                  {
+                    // Right or Down
+                    Dir2 direction = axis + 2;
+                    IK_SnapResult snap = snap_results[axis];
+                    IK_SnapResult next_snap = snap_results[(axis+1)%Axis2_COUNT];
+
+                    if(snap.snapped && ((!keep_ratio) || snap.distance <= next_snap.distance || abs_f32(snap.distance-next_snap.distance) < ULP))
+                    {
+                      F32 axis_dim = snap.value - rect_after_scale.p0.v[axis];
+                      F32 delta = axis_dim / rect_size_after_scale.v[axis];
+                      scale_delta.v[axis] *= delta;
+
+                      // Draw edge hint
+                      DR_BucketScope(ik_state->bucket_main_foreground)
+                      {
+                        F32 half_hint_thickness = 2.0f * ik_stw() * 0.5;
+                        Rng2F32 hint_rect = ik_camera_rect();
+                        F32 sign = direction < 2 ? 1.0f : -1.0f;
+
+                        hint_rect.float4[direction] = snap.value - sign*half_hint_thickness;
+                        hint_rect.float4[(direction+2)%4] = snap.value + sign*half_hint_thickness;
+
+                        Vec4F32 color = linear_from_srgba(rgba_from_u32(0xF9F1A5FF));
+                        dr_rect(hint_rect, color, 0,0,1.0*ik_stw());
+                      }
+
+                      if(keep_ratio)
+                      {
+                        scale_delta.v[(axis+1)%Axis2_COUNT] = scale_delta.v[axis];
+                      }
+                    }
+                  }
+                }
+
                 ik_box_do_scale(box, scale_delta, box->position);
               }
             }
@@ -7216,7 +7454,7 @@ ik_ui_inspector(void)
               ui_labelf("image");
             ui_spacer(ui_pct(1.0, 0.0));
             UI_PrefWidth(ui_text_dim(1, 1.0))
-              ui_labelf("%I64u %I64u", b->image->x, b->image->y);
+              ui_labelf("[%I64u, %I64u] @ %.2f", b->image->x, b->image->y, b->image->x/(float)b->image->y);
           }
 
           UI_WidthFill
@@ -9073,6 +9311,63 @@ ik_screen_pos_from_world(Vec2F32 pos)
   Vec2F32 ret = {(projected.x+1.f)/2.f, (projected.y+1.f)/2.f};
   ret.x = ret.x*ik_state->window_dim.x;
   ret.y = ret.y*ik_state->window_dim.y;
+  return ret;
+}
+
+// snapping
+internal IK_SnapResult
+ik_snapped_from_box_rect(Rng2F32 dst_rect, Dir2 direction, void *dst_box)
+{
+  IK_SnapResult ret = {0, dst_rect.float4[direction], inf32()};
+  IK_Frame *frame = ik_top_frame();
+
+  if(frame->quadtree[1])
+  {
+    Rng2F32 camera_rect = ik_camera_rect();
+
+    // Calc hit rect
+    F32 hit_size_half = 4.0f * ik_stw() * 0.5f;
+    Rng2F32 hit_rect = camera_rect;
+    float sign = direction < 2 ? 1.0f : -1.0f;
+    hit_rect.float4[direction] = dst_rect.float4[direction] - sign*hit_size_half;
+    hit_rect.float4[(direction+2)%4] = dst_rect.float4[direction] + sign*hit_size_half;
+
+    IK_Box **neighbors = 0;
+    quadtree_query(ik_frame_arena(), frame->quadtree[1], hit_rect, (void***)&neighbors);
+
+    F32 closest_src_direction = Dir2_Invalid;
+    F32 closest_value = 0.0f;
+    F32 closest_distance = inf32();
+
+    for(U64 neighbor_index = 0; neighbor_index < darray_size(neighbors); ++neighbor_index)
+    {
+      IK_Box *neighbor = neighbors[neighbor_index];
+      if(neighbor == dst_box) continue;
+      Rng2F32 neighbor_rect = neighbor->rect;
+
+      // NOTE(@k): for the same axis, we need to compare both sides
+      for(int i = 0; i < 2; ++i)
+      {
+        int src_direction = (direction+i*2)%4;
+        F32 distance = abs_f32(dst_rect.float4[direction] - neighbor_rect.float4[src_direction]);
+        if(distance < closest_distance)
+        {
+          closest_src_direction = src_direction;
+          closest_value = neighbor_rect.float4[src_direction];
+          closest_distance = distance;
+        }
+      }
+    }
+
+    F32 threshold = 14.0f * ik_stw();
+    if(closest_distance < threshold)
+    {
+      // Snapping position
+      ret.snapped = 1;
+      ret.value = closest_value;
+      ret.distance = closest_distance;
+    }
+  }
   return ret;
 }
 

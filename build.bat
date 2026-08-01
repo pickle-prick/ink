@@ -56,7 +56,7 @@ set clang_natvis=  -Xlinker /NATVIS:
 
 :: --- Per-Build Settings -----------------------------------------------------
 set link_dll=-DLL
-:: set link_icon=logo.res
+set link_icon=logo.res
 if "%msvc%"=="1"    set link_natvis=%cl_natvis%
 if "%clang%"=="1"   set link_natvis=%clang_natvis%
 if "%msvc%"=="1"    set only_compile=/c
@@ -85,10 +85,10 @@ if not exist build mkdir build
 if not exist local mkdir local
 
 :: --- Produce Logo Icon File -------------------------------------------------
-:: TODO
-:: pushd build
-:: %rc% /nologo /fo logo.res ..\data\logo.rc || exit /b 1
-:: popd
+
+pushd build
+%rc% /nologo /fo logo.res ..\data\logo.rc || exit /b 1
+popd
 
 :: --- Get Current Git Commit Id ----------------------------------------------
 for /f %%i in ('call git describe --always --dirty')   do set compile=%compile% -DBUILD_GIT_HASH=\"%%i\"

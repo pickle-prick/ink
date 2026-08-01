@@ -535,6 +535,7 @@ struct IK_Box
   Vec2F32 position; // top left
   F32 rotation; // around center, turns
   Vec2F32 rect_size;
+  Rng2F32 rect;
   Vec4F32 background_color;
   Vec4F32 text_color;
   Vec4F32 border_color;
@@ -562,7 +563,7 @@ struct IK_Box
   IK_Point *last_point;
   U64 point_count;
 
-  // Per-frmae artifacts
+  // Per-frmae build
   String8List display_lines;
   // D_FancyStringList *display_line_fstrs; // TODO: support fancy string
   DR_FRunList *display_line_fruns;
@@ -660,6 +661,9 @@ struct IK_Frame
   // box action ring buffer
   IK_BoxActionRing box_action_ring;
 
+  // Per-frame build
+  QuadTree *quadtree[2]; // Double buffered, write to 0, read from 1
+
   // free stack
   IK_Box *first_free_box;
   IK_StringBlock *first_free_string_block;
@@ -728,25 +732,36 @@ struct IK_DrawNode
   R_Handle indices;
   U64 indices_buffer_offset;
 
-  // for font altas
+  // For font altas
   R_Handle albedo_tex;
 };
 
 typedef struct IK_DrawList IK_DrawList;
 struct IK_DrawList
 {
-  // per-build
+  // Per-build
   IK_DrawNode *first_node;
   IK_DrawNode *last_node;
   U64 node_count;
   U64 vertex_buffer_cmt;
   U64 indice_buffer_cmt;
 
-  // persistent
+  // Persistent
   R_Handle vertices;
   R_Handle indices;
   U64 vertex_buffer_cap;
   U64 indice_buffer_cap;
+};
+
+////////////////////////////////
+//~ Snap Result
+
+typedef struct IK_SnapResult IK_SnapResult;
+struct IK_SnapResult
+{
+  B32 snapped;
+  F32 value;
+  F32 distance;
 };
 
 ////////////////////////////////
@@ -764,20 +779,21 @@ struct IK_State
 
   IK_SchemaTable        schema_table;
 
-  // debug
+  // Debug
   B32                   show_stats;
   B32                   show_man_page;
 
   IK_Frame              *active_frame;
 
-  // drawing buckets
+  // Drawing buckets
   DR_Bucket             *bucket_ui;
   DR_Bucket             *bucket_main;
+  DR_Bucket             *bucket_main_foreground;
 
-  // drawlists
+  // Drawlists
   IK_DrawList           *drawlists[2];
 
-  // frame history info
+  // Frame history info
   U64                   frame_index;
   U64                   frame_time_us_history[64];
   F64                   time_in_seconds;
@@ -785,13 +801,13 @@ struct IK_State
   U64                   num_frames_requested;
   B32                   is_animating;
 
-  // frame parameters
+  // Frame parameters
   F32                   frame_dt;
   F32                   cpu_time_us;
   F32                   pre_cpu_time_us;
   F32                   target_hz;
 
-  // window
+  // Window
   Rng2F32               window_rect;
   Vec2F32               window_dim;
   F32                   window_ratio;
@@ -802,17 +818,17 @@ struct IK_State
   F32                   last_dpi;
   B32                   window_should_close;
 
-  // messages
+  // Messages
   Arena                 *message_arena;
   IK_MessageList        messages;
 
-  // camera
+  // Camera
   Mat4x4F32             proj_mat;
   Mat4x4F32             proj_mat_inv;
   F32                   screen_to_world_factor; // stw
   F32                   world_to_screen_factor; // wts
 
-  // mouse
+  // Mouse
   Vec2F32               mouse;
   Vec2F32               mouse_in_world;
   Vec2F32               last_mouse;
@@ -820,15 +836,15 @@ struct IK_State
   Vec2F32               mouse_delta_in_world;
   B32                   cursor_hidden;
 
-  // image decode queue & threads
+  // Image decode queue & threads
   IK_ImageDecodeQueue   decode_queue;
   OS_Handle             decode_threads[4];
 
-  // palette
+  // Palette
   // IK_IconInfo           icon_info;
   IK_WidgetPaletteInfo  widget_palette_info;
 
-  // user interaction state
+  // User interaction state
   B32                   ui_txt_editing;
   IK_Key                hot_box_key;
   IK_Key                active_box_key[IK_MouseButtonKind_COUNT];
@@ -847,42 +863,38 @@ struct IK_State
   String8               drag_state_data;
   Arena                 *box_scratch_arena; // e.g. edit buffer
   Rng2F32               selection_rect;
-  // per-frame selection information
+  // Per-frame selection information
   IK_Box                *first_box_selected;
   IK_Box                *last_box_selected;
   Rng2F32               selection_bounds;
   U64                   selected_box_count;
-  // clipboard
+  // Clipboard
   IK_Key                last_box_key_copied;
 
-  // toolbar
+  // Toolbar
   IK_ToolKind           tool;
 
-  // drag/drop state
+  // Drag/Drop state
   IK_DragDropState      drag_drop_state;
   U64                   drag_drop_slot;
   void                  *drag_drop_src;
 
-  // theme
+  // Theme
   IK_Theme              cfg_theme_target;
   IK_Theme              cfg_theme;
   FNT_Tag               cfg_font_tags[IK_FontSlot_COUNT];
 
-  // post effects
+  // Post effects
   B32                   crt_enabled;
 
-  // palette
+  // Palette
   UI_Palette            cfg_ui_debug_palettes[IK_PaletteCode_COUNT]; // derivative from theme
   IK_Palette            cfg_main_palettes[IK_PaletteCode_COUNT]; // derivative from theme
 
-  // global Settings
+  // Global Settings
   IK_SettingVal         setting_vals[IK_SettingCode_COUNT];
 
-  // views (UI)
-  // IK_View               views[IK_ViewKind_COUNT];
-  // B32                   views_enabled[IK_ViewKind_COUNT];
-
-  // edit buffer (since we can only have one focus active ui box at a time
+  // Edit buffer (since we can only have one focus active ui box at a time
   struct
   {
     TxtPt cursor;
@@ -960,6 +972,7 @@ internal B32          ik_frame(void);
 internal Arena*       ik_frame_arena(void);
 internal IK_DrawList* ik_frame_drawlist(void);
 internal void         ik_request_frame(void);
+internal Rng2F32      ik_camera_rect(void);
 #define ik_stw() (ik_state->screen_to_world_factor)
 #define ik_wts() (ik_state->world_to_screen_factor)
 
@@ -1193,7 +1206,6 @@ internal IK_CmdKindInfo *ik_cmd_kind_info_from_string(String8 string);
 #define ik_rect_from_box(b) ((Rng2F32){b->position.x, b->position.y, b->position.x+b->rect_size.x, b->position.y+b->rect_size.y})
 
 // culling
-
 internal inline bool ik_rect_in_viewport(Rng2F32 rect);
 internal inline R_Rect2DInst *ik_dr_rect(Rng2F32 dst, Vec4F32 color, F32 corner_radius, F32 border_thickness, F32 edge_softness);
 internal inline R_Rect2DInst *ik_dr_rect_keyed(Rng2F32 dst, Vec4F32 color, F32 corner_radius, F32 border_thickness, F32 edge_softness, Vec3F32 key);
@@ -1211,6 +1223,9 @@ internal Vec2F32 ik_capped_position(Vec2F32 pos);
 internal Vec2F32 ik_screen_pos_in_world(Mat4x4F32 proj_view_mat_inv, Vec2F32 pos);
 internal Vec2F32 ik_screen_pos_from_world(Vec2F32 pos);
 #define ik_mouse_in_world(pvmi) ik_screen_pos_in_world(pvmi, ik_state->mouse)
+
+// snapping
+internal IK_SnapResult ik_snapped_from_box_rect(Rng2F32 dst_rect, Dir2 direction, void *dst_box);
 
 // encode
 internal String8 ik_b64string_from_bytes(Arena *arena, String8 src);
