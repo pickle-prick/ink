@@ -910,7 +910,7 @@ struct IK_State
   IK_WidgetPaletteInfo widget_palette_info;
 
   // User interaction state
-  B32                  ui_txt_editing;
+  B32                  txt_editing;
   IK_Key               hot_box_key;
   IK_Key               active_box_key[IK_MouseButtonKind_COUNT];
   IK_ActionSlot        action_slot;
@@ -1033,7 +1033,7 @@ internal IK_Key ik_drop_hot_key(void);
 //- interaction
 internal void ik_kill_action(void);
 internal void ik_kill_focus(void);
-#define ik_txt_editing() (ik_state->ui_txt_editing)
+#define ik_txt_editing() (ik_state->txt_editing)
 
 //- frame
 internal B32          ik_frame(void);
@@ -1235,6 +1235,8 @@ internal void      ik_ui_g_ctx_menu(void);
 internal void      ik_ui_cmd_palette(void);
 internal void      ik_ui_version(void);
 internal void      ik_ui_hsva_picker(String8 string, Vec4F32 *rgba);
+internal UI_Signal ik_ui_line_edit(TxtPt *cursor, TxtPt *mark, U8 *edit_buffer, U64 edit_buffer_size, U64 *edit_string_size_out, String8 pre_edit_value, String8 string);
+internal UI_Signal ik_ui_f32_edit(String8 string, F32 *v);
 internal UI_Signal ik_ui_checkbox(String8 key_string, B32 b);
 internal UI_Signal ik_ui_button(String8 string);
 internal UI_Signal ik_ui_buttonf(char *fmt, ...);

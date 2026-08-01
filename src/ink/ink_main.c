@@ -27,7 +27,9 @@
 
 // [h]
 #include "base/base_inc.h"
+#include "mdesk/mdesk.h"
 #include "window_manager/window_manager_inc.h"
+#include "config/config_inc.h"
 #include "render/render_inc.h"
 #include "font_provider/font_provider_inc.h"
 #include "font_cache/font_cache.h"
@@ -48,7 +50,9 @@
 
 // [c]
 #include "base/base_inc.c"
+#include "mdesk/mdesk.c"
 #include "window_manager/window_manager_inc.c"
+#include "config/config_inc.c"
 #include "render/render_inc.c"
 #include "font_provider/font_provider_inc.c"
 #include "font_cache/font_cache.c"

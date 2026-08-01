@@ -854,7 +854,6 @@ ik_frame(void)
   // ik_drawlist_reset(ik_frame_drawlist());
   arena_clear(ik_frame_arena());
   ik_state->is_animating = 0;
-  ik_state->ui_txt_editing = 0;
 
   /////////////////////////////////
   //~ Remake drawing buckets every frame
@@ -874,7 +873,8 @@ ik_frame(void)
   ik_state->window_dim = dim_2f32(ik_state->window_rect);
   ik_state->window_ratio = ik_state->window_dim.x/ik_state->window_dim.y;
   ik_state->last_mouse = ik_state->mouse;
-  ik_state->mouse = wm_window_is_focused(ik_state->os_wnd) ? wm_mouse_from_window(ik_state->os_wnd) : v2f32(-100,-100);
+  ik_state->mouse = wm_mouse_from_window(ik_state->os_wnd);
+  // ik_state->mouse = wm_window_is_focused(ik_state->os_wnd) ? wm_mouse_from_window(ik_state->os_wnd) : v2f32(-100,-100);
   ik_state->mouse_delta = sub_2f32(ik_state->mouse, ik_state->last_mouse);
   ik_state->last_dpi = ik_state->dpi;
   ik_state->dpi = ik_state->ignore_dpi_scale ? 96.0f : wm_dpi_from_window(ik_state->os_wnd);
@@ -906,7 +906,7 @@ ik_frame(void)
   //~ Pick target hz
 
   // pick among a number of sensible targets to snap to, given how well we've been performing
-  F32 target_hz = !wm_window_is_focused(ik_state->os_wnd) ? 30.0f : wm_get_system_info()->default_refresh_rate;
+  F32 target_hz = !wm_window_is_focused(ik_state->os_wnd) ? 15.0f : wm_get_system_info()->default_refresh_rate;
   if(ik_state->frame_index > 32)
   {
     F32 possible_alternate_hz_targets[] = {target_hz, 60.f, 120.f, 144.f, 240.f};
@@ -977,7 +977,8 @@ ik_frame(void)
     ui_evt.delta_2f32   = os_evt->delta;
     ui_evt.timestamp_us = os_evt->timestamp_us;
 
-    if(ui_evt.key == WM_Key_Backspace && !(ui_evt.modifiers&WM_Modifier_Ctrl) && ui_evt.kind == UI_EventKind_Press)
+    B32 txt_editing = ik_state->txt_editing;
+    if(txt_editing && ui_evt.key == WM_Key_Backspace && !(ui_evt.modifiers&WM_Modifier_Ctrl) && ui_evt.kind == UI_EventKind_Press)
     {
       ui_evt.kind       = UI_EventKind_Edit;
       ui_evt.flags      = UI_EventFlag_Delete | UI_EventFlag_KeepMark;
@@ -985,7 +986,7 @@ ik_frame(void)
       ui_evt.delta_2s32 = v2s32(-1,0);
     }
 
-    if(ui_evt.key == WM_Key_Backspace && (ui_evt.modifiers&WM_Modifier_Ctrl) && ui_evt.kind == UI_EventKind_Press)
+    if(txt_editing && ui_evt.key == WM_Key_Backspace && (ui_evt.modifiers&WM_Modifier_Ctrl) && ui_evt.kind == UI_EventKind_Press)
     {
       ui_evt.kind       = UI_EventKind_Edit;
       ui_evt.flags      = UI_EventFlag_Delete | UI_EventFlag_KeepMark;
@@ -1017,13 +1018,13 @@ ik_frame(void)
       ui_event_list_push(ui_build_arena(), &ui_events, &ui_evt_0);
     }
 
-    if(ui_evt.key == WM_Key_X && (ui_evt.modifiers & WM_Modifier_Ctrl) && ui_evt.kind == UI_EventKind_Press)
+    if(txt_editing && ui_evt.key == WM_Key_X && (ui_evt.modifiers & WM_Modifier_Ctrl) && ui_evt.kind == UI_EventKind_Press)
     {
       ui_evt.kind  = UI_EventKind_Edit;
       ui_evt.flags = UI_EventFlag_Delete | UI_EventFlag_Copy | UI_EventFlag_KeepMark;
     }
 
-    if(ui_evt.key == WM_Key_C && (ui_evt.modifiers & WM_Modifier_Ctrl) && ui_evt.kind == UI_EventKind_Press)
+    if(txt_editing && ui_evt.key == WM_Key_C && (ui_evt.modifiers & WM_Modifier_Ctrl) && ui_evt.kind == UI_EventKind_Press)
     {
       ui_evt.kind       = UI_EventKind_Edit;
       ui_evt.flags      = UI_EventFlag_Copy | UI_EventFlag_KeepMark;
@@ -1031,7 +1032,7 @@ ik_frame(void)
       ui_evt.delta_2s32 = v2s32(0,0);
     }
 
-    if(ui_evt.key == WM_Key_V && (ui_evt.modifiers & WM_Modifier_Ctrl) && ui_evt.kind == UI_EventKind_Press)
+    if(txt_editing && ui_evt.key == WM_Key_V && (ui_evt.modifiers & WM_Modifier_Ctrl) && ui_evt.kind == UI_EventKind_Press)
     {
       ui_evt.kind   = UI_EventKind_Edit;
       ui_evt.flags  = UI_EventFlag_Paste;
@@ -1076,6 +1077,8 @@ ik_frame(void)
 
     if(os_evt->kind == WM_EventKind_WindowClose) {ik_state->window_should_close = 1;}
   }
+
+  ik_state->txt_editing = 0; // Delay by one frame 
 
   ////////////////////////////////
   //- begin build UI
@@ -1434,7 +1437,7 @@ ik_frame(void)
   ////////////////////////////////
   //~ Process Dispatch Tasks
 
-  local_persist int max_image_upload_per_frame = 1;
+  local_persist int max_image_upload_per_frame = 1; // @Performance(k): Uploading to gpu is quite cpu intense, we may need to use threading in vulkan texture creation
   int uploaded_image_count_this_frame = 0;
   for(IK_AsyncTask *task = ik_state->first_async_task, *next = 0;
       task != 0;
@@ -3213,19 +3216,22 @@ internal B32
 ik_pasted(void)
 {
   B32 ret = 0;
-  for(UI_EventNode *n = ik_state->events->first, *next = 0; n != 0; n = next)
+  if(!ik_txt_editing())
   {
-    B32 taken = 0;
-    next = n->next;
-    UI_Event *evt = &n->v;
-
-    if(evt->kind == UI_EventKind_Edit && (evt->flags&UI_EventFlag_Paste))
+    for(UI_EventNode *n = ik_state->events->first, *next = 0; n != 0; n = next)
     {
-      ret = 1;
-      ui_eat_event_node(ik_state->events, n);
-      break;
-    }
+      B32 taken = 0;
+      next = n->next;
+      UI_Event *evt = &n->v;
 
+      if(evt->kind == UI_EventKind_Press && evt->key == WM_Key_V && (evt->modifiers & WM_Modifier_Ctrl))
+      {
+        ret = 1;
+        ui_eat_event_node(ik_state->events, n);
+        break;
+      }
+
+    }
   }
   return ret;
 }
@@ -3234,19 +3240,22 @@ internal B32
 ik_copied(void)
 {
   B32 ret = 0;
-  for(UI_EventNode *n = ik_state->events->first, *next = 0; n != 0; n = next)
+  if(!ik_txt_editing())
   {
-    B32 taken = 0;
-    next = n->next;
-    UI_Event *evt = &n->v;
-
-    if(evt->kind == UI_EventKind_Edit && (evt->flags&UI_EventFlag_Copy))
+    for(UI_EventNode *n = ik_state->events->first, *next = 0; n != 0; n = next)
     {
-      ret = 1;
-      ui_eat_event_node(ik_state->events, n);
-      break;
-    }
+      B32 taken = 0;
+      next = n->next;
+      UI_Event *evt = &n->v;
 
+      if(evt->kind == UI_EventKind_Press && evt->key == WM_Key_C && (evt->modifiers & WM_Modifier_Ctrl))
+      {
+        ret = 1;
+        ui_eat_event_node(ik_state->events, n);
+        break;
+      }
+
+    }
   }
   return ret;
 }
@@ -3946,6 +3955,7 @@ IK_BOX_UPDATE(text)
 
   if(is_focus_active)
   {
+    ik_state->txt_editing = 1;
     Temp scratch = scratch_begin(0,0);
     UI_EventList *events = ik_state->events;
     for(UI_EventNode *n = events->first; n != 0; n = n->next)
@@ -4282,6 +4292,7 @@ IK_BOX_UPDATE(text)
   {
     ik_state->focus_hot_box_key[IK_MouseButtonKind_Left] = box->key;
     ik_state->focus_active_box_key = box->key;
+    ik_state->txt_editing = 1;
 
     // select all text
     mark->line = 1;
@@ -5712,7 +5723,7 @@ ik_signal_from_box(IK_Box *box)
 
     if(ik_key_match(ik_state->focus_hot_box_key[IK_MouseButtonKind_Left], box->key) &&
        evt->kind == UI_EventKind_Press &&
-       evt->key == WM_Key_Delete)
+       (evt->key == WM_Key_Delete || evt->key == WM_Key_Backspace))
     {
       sig.f |= IK_SignalFlag_Delete;
       taken = 1;
@@ -7037,11 +7048,7 @@ ik_ui_inspector(void)
           UI_Signal sig;
           UI_TextAlignment(UI_TextAlign_Center)
           UI_PrefWidth(ui_px(ui_top_font_size()*6, 1.0))
-           sig = ui_f32_edit(str8_lit("stroke_size_val"), &cfg->stroke_size);
-          if(ui_is_key_auto_focus_active(sig.box->key))
-          {
-            ik_state->ui_txt_editing = 1;
-          }
+           sig = ik_ui_f32_edit(str8_lit("stroke_size_val"), &cfg->stroke_size);
         }
 
         ui_spacer(ui_em(0.2, 0.0));
@@ -7085,7 +7092,7 @@ ik_ui_inspector(void)
           UI_PrefWidth(ui_px(ui_top_font_size()*8, 1.0))
           UI_TextAlignment(UI_TextAlign_Center)
           UI_CornerRadius(2.f)
-          if(ui_committed(ui_line_edit(&ik_state->edit_buffer.cursor, &ik_state->edit_buffer.mark, ik_state->edit_buffer.buffer, ArrayCount(ik_state->edit_buffer.buffer), &ik_state->edit_buffer.string_size, b->name, str8_lit("name/tag"))))
+          if(ui_committed(ik_ui_line_edit(&ik_state->edit_buffer.cursor, &ik_state->edit_buffer.mark, ik_state->edit_buffer.buffer, ArrayCount(ik_state->edit_buffer.buffer), &ik_state->edit_buffer.string_size, b->name, str8_lit("name/tag"))))
           {
             U64 size = Min(ik_state->edit_buffer.string_size, ArrayCount(b->_name));
             MemoryCopy(b->_name, ik_state->edit_buffer.buffer, size);
@@ -8215,7 +8222,7 @@ ik_ui_hsva_picker(String8 string, Vec4F32 *rgba)
               String8 value_string = push_str8f(ui_build_arena(), "%u", value_u8);
               UI_PrefWidth(ui_text_dim(0.0, 1.0))
                 ui_labelf("%s: ", labels[i]);
-              if(ui_committed(ui_line_edit(&ik_state->edit_buffer.cursor,
+              if(ui_committed(ik_ui_line_edit(&ik_state->edit_buffer.cursor,
                                            &ik_state->edit_buffer.mark,
                                            ik_state->edit_buffer.buffer,
                                            ArrayCount(ik_state->edit_buffer.buffer),
@@ -8256,7 +8263,7 @@ ik_ui_hsva_picker(String8 string, Vec4F32 *rgba)
               String8 value_string = push_str8f(ui_build_arena(), "%.2f", value_f32);
               UI_PrefWidth(ui_text_dim(0.0, 1.0))
                 ui_labelf("%s: ", labels[i]);
-              if(ui_committed(ui_line_edit(&ik_state->edit_buffer.cursor,
+              if(ui_committed(ik_ui_line_edit(&ik_state->edit_buffer.cursor,
                                            &ik_state->edit_buffer.mark,
                                            ik_state->edit_buffer.buffer,
                                            ArrayCount(ik_state->edit_buffer.buffer),
@@ -8280,7 +8287,7 @@ ik_ui_hsva_picker(String8 string, Vec4F32 *rgba)
           UI_Font(ik_font_from_slot(IK_FontSlot_Code))
         {
           String8 string = hex_string_from_rgba_4f32(ui_build_arena(), *rgba);
-          if(ui_committed(ui_line_edit(&ik_state->edit_buffer.cursor,
+          if(ui_committed(ik_ui_line_edit(&ik_state->edit_buffer.cursor,
                                        &ik_state->edit_buffer.mark,
                                        ik_state->edit_buffer.buffer,
                                        ArrayCount(ik_state->edit_buffer.buffer),
@@ -8315,6 +8322,28 @@ ik_ui_hsva_picker(String8 string, Vec4F32 *rgba)
   ui_pop_focus_active();
 
   *rgba = rgba_from_hsva(hsva);
+}
+
+internal UI_Signal
+ik_ui_line_edit(TxtPt *cursor, TxtPt *mark, U8 *edit_buffer, U64 edit_buffer_size, U64 *edit_string_size_out, String8 pre_edit_value, String8 string)
+{
+  UI_Signal sig = ui_line_edit(cursor, mark, edit_buffer, edit_buffer_size, edit_string_size_out, pre_edit_value, string);
+  if(ui_is_key_auto_focus_active(sig.box->key))
+  {
+    ik_state->txt_editing = 1;
+  }
+  return sig;
+}
+
+internal UI_Signal
+ik_ui_f32_edit(String8 string, F32 *v)
+{
+  UI_Signal sig = ui_f32_edit(string, v);
+  if(ui_is_key_auto_focus_active(sig.box->key))
+  {
+    ik_state->txt_editing = 1;
+  }
+  return sig;
 }
 
 internal UI_Signal
@@ -8616,7 +8645,11 @@ ik_multi_line_txt_op_from_event(Arena *arena, UI_Event *event, String8 string, T
       U8 *curr = (string.str+cursor.column)-1;
       U8 *c = curr;
       S32 x_abs = abs(event->delta_2s32.x);
-      c = event->delta_2s32.x > 0 ? utf8_step_forward(c, opl, x_abs) : utf8_step_backward(c, first, x_abs);
+      c = event->delta_2s32.x > 0
+          ?
+          (c<opl ? utf8_step_forward(c, opl, x_abs) : c)
+          :
+          (c>first ? utf8_step_backward(c, first, x_abs) : c);
       delta.x = c - curr;
     }break;
     case UI_EventDeltaUnit_Word:
