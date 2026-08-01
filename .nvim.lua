@@ -28,6 +28,6 @@ if is_wsl then
   }
 end
 
-vim.keymap.set('n', '<F5>', '<cmd>Make ink msvc<CR>', { desc = 'Run async Make' })
+vim.keymap.set('n', '<F5>', '<cmd>Make ink msvc profile<CR>', { desc = 'Run async Make' })
 vim.keymap.set('n', '<F6>', '<cmd>Make ink msvc run<CR>', { desc = 'Run async Make' })
 vim.keymap.set('n', '<leader>gg', '<cmd>Make<CR>', { desc = 'Run async Make' })

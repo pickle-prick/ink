@@ -1300,7 +1300,7 @@ internal Vec2F32 ik_screen_pos_from_world(Vec2F32 pos);
 #define ik_mouse_in_world(pvmi) ik_screen_pos_in_world(pvmi, ik_state->mouse)
 
 // snapping
-internal IK_SnapResult ik_snapped_from_box_rect(Rng2F32 dst_rect, Dir2 direction, void *dst_box);
+internal IK_SnapResult ik_snapped_from_box_rect(Rng2F32 dst_rect, Dir2 direction, void *dst_box, F32 min, F32 max);
 
 // encode
 internal String8 ik_b64string_from_bytes(Arena *arena, String8 src);

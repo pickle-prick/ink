@@ -1770,7 +1770,7 @@ ik_frame(void)
               IK_SnapResult snap_results[Dir2_COUNT] = {0};
               for(int direction = Dir2_Left; direction < Dir2_COUNT; ++direction)
               {
-                snap_results[direction] = ik_snapped_from_box_rect(rect, direction, box);
+                snap_results[direction] = ik_snapped_from_box_rect(rect, direction, box, neg_inf32(), inf32());
               }
               for(int direction = Dir2_Left; direction < Dir2_COUNT; ++direction)
               {
@@ -2255,7 +2255,7 @@ ik_frame(void)
     /////////////////////////////////
     //~ Tool panel
 
-    //- pen
+    //- Pen
     if(ik_tool() == IK_ToolKind_Draw && ik_pressed(blank->sig))
     {
       IK_Box *b = ik_stroke();
@@ -2264,13 +2264,15 @@ ik_frame(void)
       ik_state->focus_active_box_key = b->key;
     }
 
-    //- rectangle tool
+    //- Rectangle tool
     if(ik_tool() == IK_ToolKind_Rectangle && ik_pressed(blank->sig))
     {
       F32 font_size = ik_top_font_size();
       F32 font_size_in_world = font_size * ik_state->screen_to_world_factor*2;
       IK_Box *box = ik_build_box_from_stringf(0, "rect###%I64u", now_time_us());
       box->flags |= (IK_BoxFlag_DrawBackground|
+                     IK_BoxFlag_DrawBorder|
+                     IK_BoxFlag_DrawDropShadow|
                      IK_BoxFlag_MouseClickable|
                      IK_BoxFlag_ClickToFocus|
                      IK_BoxFlag_DrawText|
@@ -2281,6 +2283,7 @@ ik_frame(void)
                      IK_BoxFlag_DragToScaleRectSize);
       box->position = ik_state->mouse_in_world;
       box->rect_size = v2f32(ik_state->screen_to_world_factor, ik_state->screen_to_world_factor);
+      box->rect = r2f32(box->position, add_2f32(box->position, box->rect_size));
       box->font_size = font_size_in_world;
       box->text_align = IK_TextAlign_HCenter|IK_TextAlign_VCenter;
       box->disabled_t = 1.0;
@@ -2308,7 +2311,7 @@ ik_frame(void)
       ik_state->tool = IK_ToolKind_Selection;
     }
 
-    //- text tool (tool or double click on blank to trigger)
+    //- Text tool (tool or double click on blank to trigger)
     {
       IK_ToolKind tool = ik_tool();
       if((tool == IK_ToolKind_Text && ik_pressed(blank->sig)) ||
@@ -2324,7 +2327,7 @@ ik_frame(void)
       }
     }
 
-    //- arrow tool
+    //- Arrow tool
     if(ik_tool() == IK_ToolKind_Arrow && ik_pressed(blank->sig))
     {
       IK_Box *b = ik_arrow();
@@ -2333,7 +2336,7 @@ ik_frame(void)
       ik_state->focus_active_box_key = b->key;
     }
 
-    //- file drop
+    //- File drop
     {
       Vec2F32 drop_position = ik_state->mouse;
       String8List paths = ik_file_drop(&drop_position);
@@ -2394,7 +2397,7 @@ ik_frame(void)
       }
     }
 
-    //- copy box
+    //- Copy box
     if(ik_copied())
     {
       IK_Box *active_box = ik_box_from_key(ik_state->focus_hot_box_key[IK_MouseButtonKind_Left]);
@@ -2406,7 +2409,7 @@ ik_frame(void)
       }
     }
 
-    //- paste text/image/box
+    //- Paste text/image/box
     if(ik_pasted()) ik_paste();
 
     /////////////////////////////////
@@ -4584,79 +4587,7 @@ IK_BOX_UPDATE(stroke)
 IK_BOX_DRAW(stroke)
 {
   ProfBeginFunction();
-#if 0
-  F32 base_stroke_size = box->stroke_size;
-  F32 min_visiable_stroke_size = (4*ik_state->dpi/96.f) * ik_state->screen_to_world_factor.x;
 
-  IK_Point *p0 = box->first_point;
-  IK_Point *p1 = p0 ? p0->next : 0;
-  IK_Point *p2 = p1 ? p1->next : 0;
-
-  Vec4F32 stroke_color = linear_from_srgba(box->stroke_color);
-  F32 edge_softness = 1.f * ik_state->screen_to_world_factor.x;
-
-  F32 last_scale = 1.0;
-  F32 last_point_drawn = 0;
-  while(p2)
-  {
-    // compute midpoints p0 -> p1 -> p2
-    Vec2F32 m1 = {(p0->position.x + p1->position.x) * 0.5f, (p0->position.y + p1->position.y) * 0.5f};
-    Vec2F32 m = p1->position;
-    Vec2F32 m2 = {(p1->position.x + p2->position.x) * 0.5f, (p1->position.y + p2->position.y) * 0.5f};
-
-    // scale stroke size based on dist, mimic ink pen effect
-    F32 dist = length_2f32(sub_2f32(m1, m2));
-    F32 t = round_f32(dist/base_stroke_size);
-    F32 scale = mix_1f32(1.0, 0.85, t/2.0);
-    scale = last_scale*0.9+0.1*scale;
-    last_scale = scale;
-    F32 stroke_size = base_stroke_size*scale;
-    stroke_size = ClampBot(stroke_size, min_visiable_stroke_size);
-
-    // draw quadratic curve: m1 -> m2 with p1 as control
-    {
-      Vec2F32 p0 = m1;
-      Vec2F32 p1 = m;
-      Vec2F32 p2 = m2;
-
-      // decide step size
-      F32 dist_px = length_2f32(sub_2f32(p0,p2))/ik_state->screen_to_world_factor.x;
-      U64 steps = floor_f32(dist_px/4.0);
-      steps = Clamp(1, steps, 20);
-
-      Vec2F32 prev = p0;
-      for(U64 i = 1; i <= steps; i++)
-      {
-        F32 t = (F32)i / (F32)steps;
-        F32 u = 1.0f - t;
-
-        Vec2F32 pt = {
-          u*u*p0.x + 2*u*t*p1.x + t*t*p2.x,
-          u*u*p0.y + 2*u*t*p1.y + t*t*p2.y
-        };
-
-        // draw line segment (prev → pt) with thickness
-        if(length_2f32(sub_2f32(prev, pt)) > 1e-8)
-        {
-          dr_line_keyed(prev, pt, stroke_color, stroke_size, edge_softness, box->key_3f32);
-        }
-
-        prev = pt;
-      }
-    }
-
-    p0 = p1;
-    p1 = p2;
-    p2 = p2->next;
-
-    // no more points and last point haven't drawn? -> duplicate last point
-    if(!p2 && !last_point_drawn)
-    {
-      p2 = p1;
-      last_point_drawn = 1;
-    }
-  }
-#else
   F32 base_stroke_size = box->stroke_size;
   F32 min_visiable_stroke_size = (4.5f * ik_state->dpi/96.f) * ik_state->screen_to_world_factor;
 
@@ -4723,9 +4654,9 @@ IK_BOX_DRAW(stroke)
       // 3. Add steps ONLY if width changes drastically (0.5 steps per pixel of difference)
       steps += (U64)(width_diff_in_pixels * 0.5f); 
 
-      // STRICT CLAMP: Cap at 16 (Down from 100!). 
       // 16 steps over a short curve is virtually indistinguishable from 100 but 6x faster.
-      steps = Clamp(3, steps, 16);
+      // @Performance(k): When zoom in, the could cause high cpu usage
+      steps = Clamp(3, steps, 8);
 
       Vec2F32 prev = b_p0;
 
@@ -4779,7 +4710,6 @@ IK_BOX_DRAW(stroke)
     }
   }
 
-#endif
   ProfEnd();
 }
 
@@ -6805,7 +6735,7 @@ ik_ui_selection(void)
           sig3 = ui_signal_from_box(b);
         }
 
-        // dragging
+        // Dragging
         UI_SignalFlags f = sig1.f|sig2.f|sig3.f;
         {
           if(f&UI_SignalFlag_LeftDragging || (is_active && ik_state->action_slot == IK_ActionSlot_DownRight))
@@ -6863,6 +6793,7 @@ ik_ui_selection(void)
                 }
 
                 // Snapping
+                if(1)
                 {
                   Vec2F32 rect_size_after_scale = new_rect_size;
                   Rng2F32 rect_after_scale = new_rect;
@@ -6872,7 +6803,7 @@ ik_ui_selection(void)
                   {
                     // Right or Down
                     Dir2 direction = axis + 2;
-                    snap_results[axis] = ik_snapped_from_box_rect(rect_after_scale, direction, box);
+                    snap_results[axis] = ik_snapped_from_box_rect(rect_after_scale, direction, box, rect_after_scale.min.v[axis] + 2.0f, inf32());
                   }
 
                   for(Axis2 axis = Axis2_X; axis < Axis2_COUNT; ++axis)
@@ -9694,7 +9625,7 @@ ik_screen_pos_from_world(Vec2F32 pos)
 
 // snapping
 internal IK_SnapResult
-ik_snapped_from_box_rect(Rng2F32 dst_rect, Dir2 direction, void *dst_box)
+ik_snapped_from_box_rect(Rng2F32 dst_rect, Dir2 direction, void *dst_box, F32 min, F32 max)
 {
   IK_SnapResult ret = {0, dst_rect.float4[direction], inf32()};
   IK_Frame *frame = ik_top_frame();
@@ -9728,7 +9659,9 @@ ik_snapped_from_box_rect(Rng2F32 dst_rect, Dir2 direction, void *dst_box)
       {
         int src_direction = (direction+i*2)%4;
         F32 distance = abs_f32(dst_rect.float4[direction] - neighbor_rect.float4[src_direction]);
-        if(distance < closest_distance)
+        if(distance < closest_distance &&
+           neighbor_rect.float4[src_direction] >= min &&
+           neighbor_rect.float4[src_direction] <= max)
         {
           closest_src_direction = src_direction;
           closest_value = neighbor_rect.float4[src_direction];
