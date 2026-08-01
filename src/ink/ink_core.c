@@ -9255,7 +9255,7 @@ ik_frame_to_tyml(IK_Frame *frame)
   ProfScope("Backup") if(!frame->did_backup)
   {
     String8 backup = push_str8f(scratch.arena, "%S.bak", frame->save_path);
-    os_copy_file_path(backup, frame->save_path);
+    copy_file_path(backup, frame->save_path);
     frame->did_backup = 1;
   }
 

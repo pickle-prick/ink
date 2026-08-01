@@ -1255,7 +1255,7 @@ internal Rng1U64  ik_replace_range_from_txtrng(String8 string, TxtRng txt_rng);
 
 //- frame
 internal IK_PackedFrame ik_packed_from_frame(Arena *arena, IK_Frame *frame);
-internal void           ik_save_frame_async();
+internal void           ik_save_frame_async(IK_Frame *frame);
 internal String8        ik_frame_to_tyml(IK_Frame *frame);
 internal IK_Frame*      ik_frame_from_tyml(String8 path);
 
