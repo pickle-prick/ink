@@ -34,7 +34,7 @@ internal Vec4F32 ik_top_stroke_color(void) { IK_StackTopImpl(ik_state, StrokeCol
 internal F32 ik_top_transparency(void) { IK_StackTopImpl(ik_state, Transparency, transparency) }
 internal IK_Palette*     ik_top_palette(void) { IK_StackTopImpl(ik_state, Palette, palette) }
 internal IK_BoxFlags ik_top_flags(void) { IK_StackTopImpl(ik_state, Flags, flags) }
-internal OS_Cursor ik_top_hover_cursor(void) { IK_StackTopImpl(ik_state, HoverCursor, hover_cursor) }
+internal WM_Cursor ik_top_hover_cursor(void) { IK_StackTopImpl(ik_state, HoverCursor, hover_cursor) }
 internal F32 ik_top_text_padding(void) { IK_StackTopImpl(ik_state, TextPadding, text_padding) }
 internal IK_TextAlign ik_top_text_alignment(void) { IK_StackTopImpl(ik_state, TextAlignment, text_alignment) }
 internal IK_Frame * ik_bottom_frame(void) { IK_StackBottomImpl(ik_state, Frame, frame) }
@@ -50,7 +50,7 @@ internal Vec4F32 ik_bottom_stroke_color(void) { IK_StackBottomImpl(ik_state, Str
 internal F32 ik_bottom_transparency(void) { IK_StackBottomImpl(ik_state, Transparency, transparency) }
 internal IK_Palette*     ik_bottom_palette(void) { IK_StackBottomImpl(ik_state, Palette, palette) }
 internal IK_BoxFlags ik_bottom_flags(void) { IK_StackBottomImpl(ik_state, Flags, flags) }
-internal OS_Cursor ik_bottom_hover_cursor(void) { IK_StackBottomImpl(ik_state, HoverCursor, hover_cursor) }
+internal WM_Cursor ik_bottom_hover_cursor(void) { IK_StackBottomImpl(ik_state, HoverCursor, hover_cursor) }
 internal F32 ik_bottom_text_padding(void) { IK_StackBottomImpl(ik_state, TextPadding, text_padding) }
 internal IK_TextAlign ik_bottom_text_alignment(void) { IK_StackBottomImpl(ik_state, TextAlignment, text_alignment) }
 internal IK_Frame * ik_push_frame(IK_Frame * v) { IK_StackPushImpl(ik_state, Frame, frame, IK_Frame *, v) }
@@ -66,7 +66,7 @@ internal Vec4F32 ik_push_stroke_color(Vec4F32 v) { IK_StackPushImpl(ik_state, St
 internal F32 ik_push_transparency(F32 v) { IK_StackPushImpl(ik_state, Transparency, transparency, F32, v) }
 internal IK_Palette*     ik_push_palette(IK_Palette*     v) { IK_StackPushImpl(ik_state, Palette, palette, IK_Palette*    , v) }
 internal IK_BoxFlags ik_push_flags(IK_BoxFlags v) { IK_StackPushImpl(ik_state, Flags, flags, IK_BoxFlags, v) }
-internal OS_Cursor ik_push_hover_cursor(OS_Cursor v) { IK_StackPushImpl(ik_state, HoverCursor, hover_cursor, OS_Cursor, v) }
+internal WM_Cursor ik_push_hover_cursor(WM_Cursor v) { IK_StackPushImpl(ik_state, HoverCursor, hover_cursor, WM_Cursor, v) }
 internal F32 ik_push_text_padding(F32 v) { IK_StackPushImpl(ik_state, TextPadding, text_padding, F32, v) }
 internal IK_TextAlign ik_push_text_alignment(IK_TextAlign v) { IK_StackPushImpl(ik_state, TextAlignment, text_alignment, IK_TextAlign, v) }
 internal IK_Frame * ik_pop_frame(void) { IK_StackPopImpl(ik_state, Frame, frame) }
@@ -82,7 +82,7 @@ internal Vec4F32 ik_pop_stroke_color(void) { IK_StackPopImpl(ik_state, StrokeCol
 internal F32 ik_pop_transparency(void) { IK_StackPopImpl(ik_state, Transparency, transparency) }
 internal IK_Palette*     ik_pop_palette(void) { IK_StackPopImpl(ik_state, Palette, palette) }
 internal IK_BoxFlags ik_pop_flags(void) { IK_StackPopImpl(ik_state, Flags, flags) }
-internal OS_Cursor ik_pop_hover_cursor(void) { IK_StackPopImpl(ik_state, HoverCursor, hover_cursor) }
+internal WM_Cursor ik_pop_hover_cursor(void) { IK_StackPopImpl(ik_state, HoverCursor, hover_cursor) }
 internal F32 ik_pop_text_padding(void) { IK_StackPopImpl(ik_state, TextPadding, text_padding) }
 internal IK_TextAlign ik_pop_text_alignment(void) { IK_StackPopImpl(ik_state, TextAlignment, text_alignment) }
 internal IK_Frame * ik_set_next_frame(IK_Frame * v) { IK_StackSetNextImpl(ik_state, Frame, frame, IK_Frame *, v) }
@@ -98,7 +98,7 @@ internal Vec4F32 ik_set_next_stroke_color(Vec4F32 v) { IK_StackSetNextImpl(ik_st
 internal F32 ik_set_next_transparency(F32 v) { IK_StackSetNextImpl(ik_state, Transparency, transparency, F32, v) }
 internal IK_Palette*     ik_set_next_palette(IK_Palette*     v) { IK_StackSetNextImpl(ik_state, Palette, palette, IK_Palette*    , v) }
 internal IK_BoxFlags ik_set_next_flags(IK_BoxFlags v) { IK_StackSetNextImpl(ik_state, Flags, flags, IK_BoxFlags, v) }
-internal OS_Cursor ik_set_next_hover_cursor(OS_Cursor v) { IK_StackSetNextImpl(ik_state, HoverCursor, hover_cursor, OS_Cursor, v) }
+internal WM_Cursor ik_set_next_hover_cursor(WM_Cursor v) { IK_StackSetNextImpl(ik_state, HoverCursor, hover_cursor, WM_Cursor, v) }
 internal F32 ik_set_next_text_padding(F32 v) { IK_StackSetNextImpl(ik_state, TextPadding, text_padding, F32, v) }
 internal IK_TextAlign ik_set_next_text_alignment(IK_TextAlign v) { IK_StackSetNextImpl(ik_state, TextAlignment, text_alignment, IK_TextAlign, v) }
 C_LINKAGE_BEGIN

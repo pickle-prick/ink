@@ -447,7 +447,7 @@ typedef struct IK_Signal IK_Signal;
 struct IK_Signal
 {
   IK_Box *box;
-  OS_Modifiers event_flags;
+  WM_Modifiers event_flags;
   Vec2S16 scroll;
   IK_SignalFlags f;
 };
@@ -596,7 +596,7 @@ struct IK_Box
   Vec4F32 text_color;
   Vec4F32 border_color;
   F32 ratio; // width/height
-  OS_Cursor hover_cursor;
+  WM_Cursor hover_cursor;
   // TODO(k): make it effective
   F32 transparency;
   // F32 squish;
@@ -831,7 +831,7 @@ struct IK_State
   Arena                *frame_arenas[2];
 
   R_Handle             r_wnd;
-  OS_Handle            os_wnd;
+  WM_Window            os_wnd;
   UI_EventList         *events;
 
   IK_SchemaTable       schema_table;
@@ -839,6 +839,8 @@ struct IK_State
   // Debug
   B32                  show_stats;
   B32                  show_man_page;
+
+  B32                  ignore_dpi_scale;
 
   IK_Frame             *active_frame;
 
@@ -1021,7 +1023,7 @@ internal IK_Key ik_key_from_3f32(Vec3F32 key_3f32);
 //~ State accessor/mutator
 
 //- init
-internal void ik_init(OS_Handle os_wnd, R_Handle r_wnd);
+internal void ik_init(WM_Window os_wnd, R_Handle r_wnd);
 
 //- key
 internal IK_Key ik_hot_key(void);

@@ -536,7 +536,7 @@ internal IK_Key
 ik_key_new()
 {
   // TODO: we could use generation index here
-  IK_Key ret = ik_key_make(os_now_microseconds(), 0);
+  IK_Key ret = ik_key_make(now_time_us(), 0);
   return ret;
 }
 
@@ -578,7 +578,7 @@ ik_key_from_3f32(Vec3F32 key_3f32)
 //- init
 
 internal void
-ik_init(OS_Handle os_wnd, R_Handle r_wnd)
+ik_init(WM_Window os_wnd, R_Handle r_wnd)
 {
   ProfBeginFunction();
   Arena *arena = arena_alloc();
@@ -588,20 +588,21 @@ ik_init(OS_Handle os_wnd, R_Handle r_wnd)
     ik_state->schema_table.background_color = rgba_from_u32(0x660B05FF);
     ik_state->os_wnd = os_wnd;
     ik_state->r_wnd = r_wnd;
-    ik_state->dpi = os_dpi_from_window(os_wnd);
+    ik_state->ignore_dpi_scale = 1;
+    ik_state->dpi = ik_state->ignore_dpi_scale ? 96.0f : wm_dpi_from_window(os_wnd);
     ik_state->num_frames_requested = 4;
     ik_state->last_dpi = ik_state->dpi;
-    ik_state->window_rect = os_client_rect_from_window(os_wnd, 1);
+    ik_state->window_rect = wm_client_rect_from_window(os_wnd);
     ik_state->window_dim = dim_2f32(ik_state->window_rect);
     ik_state->window_ratio = ik_state->window_dim.x/ik_state->window_dim.y;
     ik_state->drag_state_arena = arena_alloc();
     ik_state->box_scratch_arena = arena_alloc();
     ik_state->tool = IK_ToolKind_Selection;
     ik_state->message_arena = arena_alloc();
-    OS_SystemInfo *system_info = os_get_system_info();
-    ik_state->task_queue = td_queue_alloc(2048, ClampBot(1, os_get_system_info()->logical_processor_count-1));
+    WM_SystemInfo *system_info = wm_get_system_info();
+    ik_state->task_queue = td_queue_alloc(2048, ClampBot(1, get_system_info()->logical_processor_count-1));
     ik_state->task_arena = arena_alloc();
-    ik_state->tp_ctx = tp_alloc(arena, os_get_system_info()->logical_processor_count-1, os_get_system_info()->logical_processor_count-1, str8_lit("main_tp"));
+    ik_state->tp_ctx = tp_alloc(arena, get_system_info()->logical_processor_count-1, get_system_info()->logical_processor_count-1, str8_lit("main_tp"));
     // ik_state->tp_arena = tp_arena_alloc(ik_state->tp_ctx);
 
     // Frame arena
@@ -868,20 +869,20 @@ ik_frame(void)
   
   ik_state->last_window_rect = ik_state->window_rect;
   ik_state->last_window_dim = dim_2f32(ik_state->last_window_rect);
-  ik_state->window_rect = os_client_rect_from_window(ik_state->os_wnd, 0);
+  ik_state->window_rect = wm_client_rect_from_window(ik_state->os_wnd);
   ik_state->window_res_changed = ik_state->window_rect.x0 != ik_state->last_window_rect.x0 || ik_state->window_rect.x1 != ik_state->last_window_rect.x1 || ik_state->window_rect.y0 != ik_state->last_window_rect.y0 || ik_state->window_rect.y1 != ik_state->last_window_rect.y1;
   ik_state->window_dim = dim_2f32(ik_state->window_rect);
   ik_state->window_ratio = ik_state->window_dim.x/ik_state->window_dim.y;
   ik_state->last_mouse = ik_state->mouse;
-  ik_state->mouse = os_window_is_focused(ik_state->os_wnd) ? os_mouse_from_window(ik_state->os_wnd) : v2f32(-100,-100);
+  ik_state->mouse = wm_window_is_focused(ik_state->os_wnd) ? wm_mouse_from_window(ik_state->os_wnd) : v2f32(-100,-100);
   ik_state->mouse_delta = sub_2f32(ik_state->mouse, ik_state->last_mouse);
   ik_state->last_dpi = ik_state->dpi;
-  ik_state->dpi = os_dpi_from_window(ik_state->os_wnd);
+  ik_state->dpi = ik_state->ignore_dpi_scale ? 96.0f : wm_dpi_from_window(ik_state->os_wnd);
   if(ik_state->window_res_changed)
   {
     ik_request_frame();
   }
-  OS_EventList os_events = os_get_events(ik_frame_arena(), ik_state->num_frames_requested == 0);
+  WM_EventList os_events = wm_get_events(ik_frame_arena(), ik_state->num_frames_requested == 0);
 
   /////////////////////////////////
   //~ Calculate avg length in us of last many frames
@@ -905,7 +906,7 @@ ik_frame(void)
   //~ Pick target hz
 
   // pick among a number of sensible targets to snap to, given how well we've been performing
-  F32 target_hz = !os_window_is_focused(ik_state->os_wnd) ? 30.0f : os_get_gfx_info()->default_refresh_rate;
+  F32 target_hz = !wm_window_is_focused(ik_state->os_wnd) ? 30.0f : wm_get_system_info()->default_refresh_rate;
   if(ik_state->frame_index > 32)
   {
     F32 possible_alternate_hz_targets[] = {target_hz, 60.f, 120.f, 144.f, 240.f};
@@ -942,7 +943,7 @@ ik_frame(void)
   ik_state->animation.slaf_rate = 1 - pow_f32(2, (-8.f  * ik_state->frame_dt));
 
   // Begin measuring actual per-frame work
-  U64 begin_time_us = os_now_microseconds();
+  U64 begin_time_us = now_time_us();
 
   /////////////////////////////////
   //~ Build UI
@@ -951,7 +952,7 @@ ik_frame(void)
   //- build event list for UI
 
   UI_EventList ui_events = {0};
-  for(OS_Event *os_evt = os_events.first; os_evt != 0; os_evt = os_evt->next)
+  for(WM_Event *os_evt = os_events.first; os_evt != 0; os_evt = os_evt->next)
   {
     UI_Event ui_evt = {0};
 
@@ -959,12 +960,12 @@ ik_frame(void)
     switch(os_evt->kind)
     {
       default:{}break;
-      case OS_EventKind_Press:     {kind = UI_EventKind_Press;}break;
-      case OS_EventKind_Release:   {kind = UI_EventKind_Release;}break;
-      case OS_EventKind_MouseMove: {kind = UI_EventKind_MouseMove;}break;
-      case OS_EventKind_Text:      {kind = UI_EventKind_Text;}break;
-      case OS_EventKind_Scroll:    {kind = UI_EventKind_Scroll;}break;
-      case OS_EventKind_FileDrop:  {kind = UI_EventKind_FileDrop;}break;
+      case WM_EventKind_Press:     {kind = UI_EventKind_Press;}break;
+      case WM_EventKind_Release:   {kind = UI_EventKind_Release;}break;
+      case WM_EventKind_MouseMove: {kind = UI_EventKind_MouseMove;}break;
+      case WM_EventKind_Text:      {kind = UI_EventKind_Text;}break;
+      case WM_EventKind_Scroll:    {kind = UI_EventKind_Scroll;}break;
+      case WM_EventKind_FileDrop:  {kind = UI_EventKind_FileDrop;}break;
     }
 
     ui_evt.kind         = kind;
@@ -976,7 +977,7 @@ ik_frame(void)
     ui_evt.delta_2f32   = os_evt->delta;
     ui_evt.timestamp_us = os_evt->timestamp_us;
 
-    if(ui_evt.key == OS_Key_Backspace && !(ui_evt.modifiers&OS_Modifier_Ctrl) && ui_evt.kind == UI_EventKind_Press)
+    if(ui_evt.key == WM_Key_Backspace && !(ui_evt.modifiers&WM_Modifier_Ctrl) && ui_evt.kind == UI_EventKind_Press)
     {
       ui_evt.kind       = UI_EventKind_Edit;
       ui_evt.flags      = UI_EventFlag_Delete | UI_EventFlag_KeepMark;
@@ -984,7 +985,7 @@ ik_frame(void)
       ui_evt.delta_2s32 = v2s32(-1,0);
     }
 
-    if(ui_evt.key == OS_Key_Backspace && (ui_evt.modifiers&OS_Modifier_Ctrl) && ui_evt.kind == UI_EventKind_Press)
+    if(ui_evt.key == WM_Key_Backspace && (ui_evt.modifiers&WM_Modifier_Ctrl) && ui_evt.kind == UI_EventKind_Press)
     {
       ui_evt.kind       = UI_EventKind_Edit;
       ui_evt.flags      = UI_EventFlag_Delete | UI_EventFlag_KeepMark;
@@ -997,12 +998,12 @@ ik_frame(void)
       ui_evt.flags = UI_EventFlag_KeepMark;
     }
 
-    if(ui_evt.key == OS_Key_Return && ui_evt.kind == UI_EventKind_Press)
+    if(ui_evt.key == WM_Key_Return && ui_evt.kind == UI_EventKind_Press)
     {
       ui_evt.slot = UI_EventActionSlot_Accept;
     }
 
-    if(ui_evt.key == OS_Key_A && (ui_evt.modifiers & OS_Modifier_Ctrl) && ui_evt.kind == UI_EventKind_Press)
+    if(ui_evt.key == WM_Key_A && (ui_evt.modifiers & WM_Modifier_Ctrl) && ui_evt.kind == UI_EventKind_Press)
     {
       ui_evt.kind       = UI_EventKind_Navigate;
       ui_evt.flags      = UI_EventFlag_KeepMark;
@@ -1016,13 +1017,13 @@ ik_frame(void)
       ui_event_list_push(ui_build_arena(), &ui_events, &ui_evt_0);
     }
 
-    if(ui_evt.key == OS_Key_X && (ui_evt.modifiers & OS_Modifier_Ctrl) && ui_evt.kind == UI_EventKind_Press)
+    if(ui_evt.key == WM_Key_X && (ui_evt.modifiers & WM_Modifier_Ctrl) && ui_evt.kind == UI_EventKind_Press)
     {
       ui_evt.kind  = UI_EventKind_Edit;
       ui_evt.flags = UI_EventFlag_Delete | UI_EventFlag_Copy | UI_EventFlag_KeepMark;
     }
 
-    if(ui_evt.key == OS_Key_C && (ui_evt.modifiers & OS_Modifier_Ctrl) && ui_evt.kind == UI_EventKind_Press)
+    if(ui_evt.key == WM_Key_C && (ui_evt.modifiers & WM_Modifier_Ctrl) && ui_evt.kind == UI_EventKind_Press)
     {
       ui_evt.kind       = UI_EventKind_Edit;
       ui_evt.flags      = UI_EventFlag_Copy | UI_EventFlag_KeepMark;
@@ -1030,31 +1031,31 @@ ik_frame(void)
       ui_evt.delta_2s32 = v2s32(0,0);
     }
 
-    if(ui_evt.key == OS_Key_V && (ui_evt.modifiers & OS_Modifier_Ctrl) && ui_evt.kind == UI_EventKind_Press)
+    if(ui_evt.key == WM_Key_V && (ui_evt.modifiers & WM_Modifier_Ctrl) && ui_evt.kind == UI_EventKind_Press)
     {
       ui_evt.kind   = UI_EventKind_Edit;
       ui_evt.flags  = UI_EventFlag_Paste;
-      // ui_evt.string = os_get_clipboard_text(ui_build_arena());
+      // ui_evt.string = wm_get_clipboard_text(ui_build_arena());
     }
 
-    if(ui_evt.key == OS_Key_Left && ui_evt.kind == UI_EventKind_Press)
+    if(ui_evt.key == WM_Key_Left && ui_evt.kind == UI_EventKind_Press)
     {
       ui_evt.kind       = UI_EventKind_Navigate;
       ui_evt.flags      = 0;
-      ui_evt.delta_unit = ui_evt.modifiers & OS_Modifier_Ctrl ? UI_EventDeltaUnit_Word : UI_EventDeltaUnit_Char;
+      ui_evt.delta_unit = ui_evt.modifiers & WM_Modifier_Ctrl ? UI_EventDeltaUnit_Word : UI_EventDeltaUnit_Char;
       ui_evt.delta_2s32 = v2s32(-1,0);
     }
 
-    if(ui_evt.key == OS_Key_Right && ui_evt.kind == UI_EventKind_Press)
+    if(ui_evt.key == WM_Key_Right && ui_evt.kind == UI_EventKind_Press)
     {
       ui_evt.kind       = UI_EventKind_Navigate;
       ui_evt.flags      = 0;
-      ui_evt.delta_unit = ui_evt.modifiers & OS_Modifier_Ctrl ? UI_EventDeltaUnit_Word : UI_EventDeltaUnit_Char;
+      ui_evt.delta_unit = ui_evt.modifiers & WM_Modifier_Ctrl ? UI_EventDeltaUnit_Word : UI_EventDeltaUnit_Char;
       ui_evt.delta_2s32 = v2s32(1,0);
     }
 
     // k
-    if(ui_evt.key == OS_Key_Up && ui_evt.kind == UI_EventKind_Press)
+    if(ui_evt.key == WM_Key_Up && ui_evt.kind == UI_EventKind_Press)
     {
       ui_evt.kind       = UI_EventKind_Navigate;
       ui_evt.flags      = 0;
@@ -1063,7 +1064,7 @@ ik_frame(void)
     }
 
     // k
-    if(ui_evt.key == OS_Key_Down && ui_evt.kind == UI_EventKind_Press)
+    if(ui_evt.key == WM_Key_Down && ui_evt.kind == UI_EventKind_Press)
     {
       ui_evt.kind       = UI_EventKind_Navigate;
       ui_evt.flags      = 0;
@@ -1073,7 +1074,7 @@ ik_frame(void)
 
     UI_EventNode *evt_node = ui_event_list_push(ui_build_arena(), &ui_events, &ui_evt);
 
-    if(os_evt->kind == OS_EventKind_WindowClose) {ik_state->window_should_close = 1;}
+    if(os_evt->kind == WM_EventKind_WindowClose) {ik_state->window_should_close = 1;}
   }
 
   ////////////////////////////////
@@ -1161,9 +1162,9 @@ ik_frame(void)
   if(frame == 0)
   {
     // TODO(Next): check if default tyml is there and can be loaded, otherwise we create a new frame
-    String8 binary_path = os_get_process_info()->binary_path; // only directory
+    String8 binary_path = get_process_info()->binary_path; // only directory
     String8 default_path = push_str8f(ik_frame_arena(), "%S/default.tyml", binary_path);
-    if(os_file_path_exists(default_path))
+    if(file_path_exists(default_path))
     {
       // TODO(Next): we want to handle parse error here
       frame = ik_frame_from_tyml(default_path);
@@ -1236,14 +1237,14 @@ ik_frame(void)
     UI_Event *evt = &n->v;
 
     UI_MouseButtonKind evt_mouse_button_kind = 
-      evt->key == OS_Key_LeftMouseButton   ? UI_MouseButtonKind_Left   :
-      evt->key == OS_Key_RightMouseButton  ? UI_MouseButtonKind_Right  :
-      evt->key == OS_Key_MiddleMouseButton ? UI_MouseButtonKind_Middle :
+      evt->key == WM_Key_LeftMouseButton   ? UI_MouseButtonKind_Left   :
+      evt->key == WM_Key_RightMouseButton  ? UI_MouseButtonKind_Right  :
+      evt->key == WM_Key_MiddleMouseButton ? UI_MouseButtonKind_Middle :
       UI_MouseButtonKind_Left;
     B32 evt_key_is_mouse =
-      evt->key == OS_Key_LeftMouseButton  || 
-      evt->key == OS_Key_RightMouseButton ||
-      evt->key == OS_Key_MiddleMouseButton;
+      evt->key == WM_Key_LeftMouseButton  || 
+      evt->key == WM_Key_RightMouseButton ||
+      evt->key == WM_Key_MiddleMouseButton;
 
     if(evt->kind == UI_EventKind_Press && evt_key_is_mouse)
     {
@@ -1296,7 +1297,7 @@ ik_frame(void)
       UI_Event *evt = &n->v;
 
       // camera pan begin
-      if(can_pan && !is_panning && evt->kind == UI_EventKind_Press && evt->key == OS_Key_LeftMouseButton)
+      if(can_pan && !is_panning && evt->kind == UI_EventKind_Press && evt->key == WM_Key_LeftMouseButton)
       {
         IK_CameraDrag drag = {camera->position, ik_state->mouse};
         ik_store_drag_struct(&drag);
@@ -1306,14 +1307,14 @@ ik_frame(void)
       }
 
       // camera pan end
-      if(is_panning && (evt->kind == UI_EventKind_Release && evt->key == OS_Key_LeftMouseButton))
+      if(is_panning && (evt->kind == UI_EventKind_Release && evt->key == WM_Key_LeftMouseButton))
       {
         is_panning = 0;
         taken = 1;
       }
 
       // camera zoom in/out
-      if(evt->kind == UI_EventKind_Scroll && evt->modifiers == OS_Modifier_Ctrl)
+      if(evt->kind == UI_EventKind_Scroll && evt->modifiers == WM_Modifier_Ctrl)
       {
         is_zooming = 1;
 
@@ -1490,7 +1491,7 @@ ik_frame(void)
 
   // unpack ctx
   B32 cursor_override = 0;
-  OS_Cursor next_cursor = 0;
+  WM_Cursor next_cursor = WM_Cursor_Pointer;
 
   ////////////////////////////////
   //- window resized
@@ -2021,7 +2022,7 @@ ik_frame(void)
       UI_Event *evt = &n->v;
 
       // up-down scroll
-      if(evt->kind == UI_EventKind_Scroll && evt->modifiers != OS_Modifier_Ctrl)
+      if(evt->kind == UI_EventKind_Scroll && evt->modifiers != WM_Modifier_Ctrl)
       {
         Vec2F32 delta = evt->delta_2f32;
         Vec2S16 delta16 = v2s16((S16)(delta.x/30.f), (S16)(delta.y/30.f));
@@ -2070,7 +2071,7 @@ ik_frame(void)
     /////////////////////////////////
     //~ Hot keys
 
-    if(os_window_is_focused(ik_state->os_wnd) && ik_key_match(ik_state->focus_active_box_key, ik_key_zero()))
+    if(wm_window_is_focused(ik_state->os_wnd) && ik_key_match(ik_state->focus_active_box_key, ik_key_zero()))
     {
       for(UI_EventNode *evt_node = ik_state->events->first, *next_evt_node = 0;
           evt_node != 0;
@@ -2081,58 +2082,58 @@ ik_frame(void)
 
         B32 eat = 0;
         // NOTE(@k): press 1 would produce two events (text & key_pressed), we would either check if ui is text-editing, or we need to check again Text event  
-        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_1 && evt->modifiers == 0 && !ik_txt_editing())
+        if(evt->kind == UI_EventKind_Press && evt->key == WM_Key_1 && evt->modifiers == 0 && !ik_txt_editing())
         {
           ik_state->tool = IK_ToolKind_Hand;
           eat = 1;
         }
-        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_2 && evt->modifiers == 0 && !ik_txt_editing())
+        if(evt->kind == UI_EventKind_Press && evt->key == WM_Key_2 && evt->modifiers == 0 && !ik_txt_editing())
         {
           ik_state->tool = IK_ToolKind_Selection;
           eat = 1;
         }
-        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_3 && evt->modifiers == 0 && !ik_txt_editing())
+        if(evt->kind == UI_EventKind_Press && evt->key == WM_Key_3 && evt->modifiers == 0 && !ik_txt_editing())
         {
           ik_state->tool = IK_ToolKind_Rectangle;
           eat = 1;
         }
-        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_4 && evt->modifiers == 0 && !ik_txt_editing())
+        if(evt->kind == UI_EventKind_Press && evt->key == WM_Key_4 && evt->modifiers == 0 && !ik_txt_editing())
         {
           ik_state->tool = IK_ToolKind_Draw;
           eat = 1;
         }
-        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_5 && evt->modifiers == 0 && !ik_txt_editing())
+        if(evt->kind == UI_EventKind_Press && evt->key == WM_Key_5 && evt->modifiers == 0 && !ik_txt_editing())
         {
           ik_state->tool = IK_ToolKind_Text;
           eat = 1;
         }
-        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_6 && evt->modifiers == 0 && !ik_txt_editing())
+        if(evt->kind == UI_EventKind_Press && evt->key == WM_Key_6 && evt->modifiers == 0 && !ik_txt_editing())
         {
           ik_state->tool = IK_ToolKind_Arrow;
           eat = 1;
         }
-        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_7 && evt->modifiers == 0 && !ik_txt_editing())
+        if(evt->kind == UI_EventKind_Press && evt->key == WM_Key_7 && evt->modifiers == 0 && !ik_txt_editing())
         {
           ik_state->show_man_page = !ik_state->show_man_page;
           eat = 1;
         }
-        // if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_I && evt->modifiers == 0)
+        // if(evt->kind == UI_EventKind_Press && evt->key == WM_Key_I && evt->modifiers == 0)
         // {
         //   ik_state->tool = IK_ToolKind_InsertImage;
         //   eat = 1;
         // }
-        // if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_E && evt->modifiers == 0)
+        // if(evt->kind == UI_EventKind_Press && evt->key == WM_Key_E && evt->modifiers == 0)
         // {
         //   ik_state->tool = IK_ToolKind_Eraser;
         //   eat = 1;
         // }
-        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_Tick && (evt->modifiers & OS_Modifier_Ctrl) && !ik_txt_editing())
+        if(evt->kind == UI_EventKind_Press && evt->key == WM_Key_Tick && (evt->modifiers & WM_Modifier_Ctrl) && !ik_txt_editing())
         {
           ik_state->show_stats = !ik_state->show_stats;
           eat = 1;
         }
         // FIXME: this is weird, maybe we should just parse events as a CommandList
-        if(evt->kind == UI_EventKind_Navigate && evt->key == OS_Key_A && (evt->modifiers&OS_Modifier_Ctrl) && evt->delta_2s32.x == 1 && !ik_txt_editing())
+        if(evt->kind == UI_EventKind_Navigate && evt->key == WM_Key_A && (evt->modifiers&WM_Modifier_Ctrl) && evt->delta_2s32.x == 1 && !ik_txt_editing())
         {
           // clear selection first
           ik_selection_clear();
@@ -2145,12 +2146,12 @@ ik_frame(void)
           }
           ik_selection_commit();
         }
-        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_Z && (evt->modifiers & OS_Modifier_Ctrl) && !ik_txt_editing())
+        if(evt->kind == UI_EventKind_Press && evt->key == WM_Key_Z && (evt->modifiers & WM_Modifier_Ctrl) && !ik_txt_editing())
         {
           ik_undo();
           eat = 1;
         }
-        if(evt->kind == UI_EventKind_Press && evt->key == OS_Key_R && (evt->modifiers & OS_Modifier_Ctrl) && !ik_txt_editing())
+        if(evt->kind == UI_EventKind_Press && evt->key == WM_Key_R && (evt->modifiers & WM_Modifier_Ctrl) && !ik_txt_editing())
         {
           eat = 1;
           ik_redo();
@@ -2265,7 +2266,7 @@ ik_frame(void)
     {
       F32 font_size = ik_top_font_size();
       F32 font_size_in_world = font_size * ik_state->screen_to_world_factor*2;
-      IK_Box *box = ik_build_box_from_stringf(0, "rect###%I64u", os_now_microseconds());
+      IK_Box *box = ik_build_box_from_stringf(0, "rect###%I64u", now_time_us());
       box->flags |= (IK_BoxFlag_DrawBackground|
                      IK_BoxFlag_MouseClickable|
                      IK_BoxFlag_ClickToFocus|
@@ -2281,7 +2282,7 @@ ik_frame(void)
       box->text_align = IK_TextAlign_HCenter|IK_TextAlign_VCenter;
       box->disabled_t = 1.0;
       box->ratio = 1.f;
-      box->hover_cursor = OS_Cursor_UpDownLeftRight;
+      box->hover_cursor = WM_Cursor_UpDownLeftRight;
       box->draw_frame_index = ik_state->frame_index+1;
 
       // capture
@@ -2336,7 +2337,7 @@ ik_frame(void)
       if(paths.node_count > 0)
       {
         // NOTE(k): drag on w32 could make window out of focus 
-        os_window_focus(ik_state->os_wnd);
+        wm_window_focus(ik_state->os_wnd);
 
         Vec2F32 position = ik_screen_pos_in_world(ik_state->proj_mat_inv, drop_position);
         F32 offset_x = 0;
@@ -2346,14 +2347,14 @@ ik_frame(void)
         {
           String8 path = n->string; 
 
-          OS_Handle file = os_file_open(OS_AccessFlag_ShareRead|OS_AccessFlag_Read, path);
-          if(!os_handle_match(os_handle_zero(), file))
+          File file = file_open(AccessFlag_ShareRead|AccessFlag_Read, path);
+          if(!file_match(file_zero(), file))
           {
-            FileProperties prop = os_properties_from_file(file);
+            FileProperties prop = properties_from_file(file);
             String8 encoded = ik_str8_new(prop.size);
             encoded.size = prop.size;
-            U64 read = os_file_read(file, (Rng1U64){0, prop.size}, (void*)encoded.str);
-            os_file_close(file);
+            U64 read = file_read(file, (Rng1U64){0, prop.size}, (void*)encoded.str);
+            file_close(file);
 
 
             // decide initial width&height
@@ -2397,7 +2398,7 @@ ik_frame(void)
       if(active_box)
       {
         // empty system clipboard
-        os_set_clipboard_text(str8_lit(""));
+        wm_set_clipboard_text(str8_lit(""));
         ik_state->last_box_key_copied = active_box->key;
       }
     }
@@ -2408,7 +2409,7 @@ ik_frame(void)
     /////////////////////////////////
     //~ Save
 
-    if(ui_key_press(OS_Modifier_Ctrl, OS_Key_S))
+    if(ui_key_press(WM_Modifier_Ctrl, WM_Key_S))
     {
       ik_save_frame_async(frame);
       ik_message_push(push_str8f(ik_frame_arena(), "Saving: %S", frame->save_path));
@@ -2427,8 +2428,8 @@ ik_frame(void)
       IK_Box *box = active == 0 ? hot : active;
       if(box)
       {
-        OS_Cursor cursor = box->hover_cursor;
-        if(os_window_is_focused(ik_state->os_wnd) || active != 0)
+        WM_Cursor cursor = box->hover_cursor;
+        if(wm_window_is_focused(ik_state->os_wnd) || active != 0)
         {
           // NOTE: ui_end_build will override cursor, so we have to override it again
           // TODO: still not ideal, find a better way
@@ -2440,21 +2441,21 @@ ik_frame(void)
 
     if(ik_tool() == IK_ToolKind_Hand)
     {
-      next_cursor = OS_Cursor_HandPoint;
+      next_cursor = WM_Cursor_HandPoint;
       cursor_override = 1;
     }
 
     if(ik_tool() == IK_ToolKind_Text)
     {
-      next_cursor = OS_Cursor_IBar;
+      next_cursor = WM_Cursor_IBar;
       cursor_override = 1;
     }
 
-    if(ik_tool() == IK_ToolKind_Draw)
-    {
-      next_cursor = OS_Cursor_Cross;
-      cursor_override = 1;
-    }
+    // if(ik_tool() == IK_ToolKind_Draw)
+    // {
+    //   next_cursor = WM_Cursor_Cross;
+    //   cursor_override = 1;
+    // }
   }
 
   /////////////////////////////////
@@ -2470,7 +2471,7 @@ ik_frame(void)
   if(!ui_state->grab_cursor && cursor_override)
   {
     // FIXME: ui will set a default cursor regardless, if we override again here, win32 os will send a window event, thus no sleep at all
-    os_set_cursor(next_cursor);
+    wm_set_cursor(next_cursor);
   }
 
   if(ui_animating_from_state(ui_state))
@@ -2752,7 +2753,7 @@ ik_frame(void)
   //   ik_drawlist_build(ik_frame_drawlist());
   // }
 
-  ik_state->pre_cpu_time_us = os_now_microseconds()-begin_time_us;
+  ik_state->pre_cpu_time_us = now_time_us()-begin_time_us;
 
   // submit drawing bucket
   B32 can_submit = ik_state->window_dim.x > 0 && ik_state->window_dim.y > 0;
@@ -2782,13 +2783,17 @@ ik_frame(void)
   /////////////////////////////////
   //~ Wait if we still have some cpu time left
 
+#if 1
   U64 frame_time_target_cap_us = (U64)(1000000/target_hz);
-  U64 work_us = os_now_microseconds()-begin_time_us;
+  U64 work_us = now_time_us()-begin_time_us;
   ik_state->cpu_time_us = work_us;
   ik_state->target_hz = target_hz;
+
+  // U64 debug_remain_ms = (frame_time_target_cap_us-work_us);
+  // U64 debug_sleep_begin = now_time_us();
   if(work_us < frame_time_target_cap_us)
   {
-    ProfScope("wait frame target cap")
+    ProfScope("CPU Idle")
     {
       while(work_us < frame_time_target_cap_us)
       {
@@ -2797,9 +2802,9 @@ ik_frame(void)
         U64 remain_ms = (frame_time_target_cap_us-work_us)/1000;
         if(granular_sleep && remain_ms > 2)
         {
-          os_sleep_milliseconds(remain_ms-1);
+          sleep_ms(remain_ms-1);
         }
-        work_us = os_now_microseconds()-begin_time_us;
+        work_us = now_time_us()-begin_time_us;
       }
     }
   }
@@ -2810,15 +2815,17 @@ ik_frame(void)
     fprintf(stderr, "missed frame, over %06.2f ms from %06.2f ms\n", (work_us-frame_time_target_cap_us)/1000.0, frame_time_target_cap_us/1000.0);
     // TODO(k): not sure why spall why not flushing if we stopped to early, maybe there is a limit for flushing
 
-    // tag it
+    // Tag Missed Frame
     ProfBegin("MISSED FRAME");
     ProfEnd();
   }
+  // printf("Idle %.2f ms, Slept %.2f ms\n", debug_remain_ms/1000.0f, (now_time_us()-debug_sleep_begin)/1000.0f);
+#endif
 
   /////////////////////////////////
   //~ Determine frame time, record it into history
 
-  U64 end_time_us = os_now_microseconds();
+  U64 end_time_us = now_time_us();
   U64 frame_time_us = end_time_us-begin_time_us;
   ik_state->frame_time_us_history[ik_state->frame_index%ArrayCount(ik_state->frame_time_us_history)] = frame_time_us;
 
@@ -2887,7 +2894,7 @@ internal IK_ToolKind
 ik_tool(void)
 {
   IK_ToolKind ret = ik_state->tool;
-  B32 space_is_down = os_key_is_down(OS_Key_Space);
+  B32 space_is_down = wm_key_is_down(WM_Key_Space);
   if(space_is_down && ik_key_match(ik_state->focus_active_box_key, ik_key_zero())) ret = IK_ToolKind_Hand;
   return ret;
 }
@@ -3089,11 +3096,11 @@ ik_paste()
   B32 content_is_text = 0;
   B32 content_is_image = 0;
   B32 pasted = 0;
-  String8 content = os_get_clipboard_text(scratch.arena);
+  String8 content = wm_get_clipboard_text(scratch.arena);
   content_is_text = content.size > 0;
   if(!content_is_text)
   {
-    content = os_get_clipboard_image(scratch.arena);
+    content = wm_get_clipboard_image(scratch.arena);
     content_is_image = content.size > 0;
   }
 
@@ -3550,7 +3557,7 @@ ik_frame_alloc()
   /////////////////////////////////
   //~ Fill default settings
 
-  String8 binary_path = os_get_process_info()->binary_path; // only directory
+  String8 binary_path = get_process_info()->binary_path; // only directory
   // TODO(Next): may use proper filepath join
   String8 save_path = push_str8f(scratch.arena, "%S/default.tyml", binary_path);
   frame->save_path = push_str8_copy_static(save_path, frame->_save_path);
@@ -3590,7 +3597,7 @@ ik_frame_alloc()
                                             IK_BoxFlag_FixedRatio|
                                             IK_BoxFlag_FitChildren,
                                             "select");
-  frame->select->hover_cursor = OS_Cursor_UpDownLeftRight;
+  frame->select->hover_cursor = WM_Cursor_UpDownLeftRight;
   frame->select->background_color.w = 0.05;
 
   ik_pop_frame();
@@ -3750,7 +3757,7 @@ ik_box_clone(IK_Box *src)
     // create a different key name
     local_persist U64 clone_counter = 0;
     clone_counter++;
-    String8 dst_name = push_str8f(scratch.arena, "%S###%I64u_%I64u", src_name, os_now_microseconds(), clone_counter);
+    String8 dst_name = push_str8f(scratch.arena, "%S###%I64u_%I64u", src_name, now_time_us(), clone_counter);
     ret = ik_build_box_from_string(flags, dst_name);
     parent = ret;
 
@@ -3945,7 +3952,7 @@ IK_BOX_UPDATE(text)
     {
       UI_Event *evt = &n->v;
 
-      if(evt->key == OS_Key_Return && evt->kind == UI_EventKind_Press)
+      if(evt->key == WM_Key_Return && evt->kind == UI_EventKind_Press)
       {
         evt->kind = UI_EventKind_Text;
         evt->string = str8_lit("\n");
@@ -3968,7 +3975,7 @@ IK_BOX_UPDATE(text)
 
       if((op.flags&UI_TxtOpFlag_Copy) && op.copy.size != 0)
       {
-        os_set_clipboard_text(op.copy);
+        wm_set_clipboard_text(op.copy);
         ik_message_push(str8_lit("Copied"));
       }
 
@@ -4301,7 +4308,8 @@ IK_BOX_UPDATE(text)
     pos = ik_screen_pos_from_world(pos);
     pos.x = Clamp(0, pos.x, ik_state->window_dim.x);
     pos.y = Clamp(0, pos.y, ik_state->window_dim.y);
-    os_set_ime_position(ik_state->os_wnd, v2s32(pos.x, pos.y));
+    // @TODO(k): Add back
+    // wm_set_ime_position(ik_state->os_wnd, v2s32(pos.x, pos.y));
   }
 
   // focus active and double clicked? -> select current word
@@ -4382,7 +4390,7 @@ IK_BOX_UPDATE(text)
     box->mark = mark;
   }
 
-  box->hover_cursor = is_focus_active ? OS_Cursor_IBar : OS_Cursor_UpDownLeftRight;
+  box->hover_cursor = is_focus_active ? WM_Cursor_IBar : WM_Cursor_UpDownLeftRight;
   ProfEnd();
 }
 
@@ -4449,7 +4457,7 @@ ik_text(String8 string, Vec2F32 pos)
   F32 font_size = ik_top_font_size();
   F32 font_size_in_world = font_size * ik_state->screen_to_world_factor * 2;
 
-  box = ik_build_box_from_stringf(0, "text###%I64u", os_now_microseconds());
+  box = ik_build_box_from_stringf(0, "text###%I64u", now_time_us());
   box->flags |= IK_BoxFlag_MouseClickable|
                 IK_BoxFlag_ClickToFocus|
                 IK_BoxFlag_DrawText|
@@ -4460,7 +4468,7 @@ ik_text(String8 string, Vec2F32 pos)
                 IK_BoxFlag_DragToPosition;
   box->position = pos;
   box->rect_size = v2f32(font_size_in_world*3, font_size_in_world);
-  box->hover_cursor = OS_Cursor_UpDownLeftRight;
+  box->hover_cursor = WM_Cursor_UpDownLeftRight;
   box->font_size = font_size_in_world;
   box->ratio = 0;
   box->disabled_t = 1.0;
@@ -4477,11 +4485,11 @@ ik_text(String8 string, Vec2F32 pos)
 internal IK_Box *
 ik_image(IK_BoxFlags flags, Vec2F32 pos, Vec2F32 rect_size, IK_Image *image)
 {
-  IK_Box *box = ik_build_box_from_stringf(0, "image###%I64u", os_now_microseconds());
+  IK_Box *box = ik_build_box_from_stringf(0, "image###%I64u", now_time_us());
   box->flags = flags|IK_BoxFlag_DrawImage|IK_BoxFlag_MouseClickable|IK_BoxFlag_ClickToFocus|IK_BoxFlag_FixedRatio|IK_BoxFlag_DragToPosition|IK_BoxFlag_DragToScaleRectSize|IK_BoxFlag_DoubleClickToCenter;
   box->position = pos;
   box->rect_size = rect_size;
-  box->hover_cursor = OS_Cursor_UpDownLeftRight;
+  box->hover_cursor = WM_Cursor_UpDownLeftRight;
   box->image = image;
   image->rc++;
   return box;
@@ -4501,7 +4509,7 @@ IK_BOX_UPDATE(stroke)
       next = n->next;
       UI_Event *evt = &n->v;
 
-      if(evt->kind == UI_EventKind_Release && evt->key == OS_Key_LeftMouseButton)
+      if(evt->kind == UI_EventKind_Release && evt->key == WM_Key_LeftMouseButton)
       {
         // ik_state->focus_hot_box_key = ik_key_zero();
         is_focus_active = 0;
@@ -4767,7 +4775,7 @@ IK_BOX_DRAW(stroke)
 internal IK_Box *
 ik_stroke()
 {
-  IK_Box *box = ik_build_box_from_stringf(0, "stroke###%I64u", os_now_microseconds());
+  IK_Box *box = ik_build_box_from_stringf(0, "stroke###%I64u", now_time_us());
   box->flags = IK_BoxFlag_MouseClickable|
                IK_BoxFlag_ClickToFocus|
                IK_BoxFlag_DragToPosition|
@@ -4775,7 +4783,7 @@ ik_stroke()
                IK_BoxFlag_DragToScaleRectSize|
                IK_BoxFlag_DragToScalePoint|
                IK_BoxFlag_DrawStroke;
-  box->hover_cursor = OS_Cursor_UpDownLeftRight;
+  box->hover_cursor = WM_Cursor_UpDownLeftRight;
   box->ratio = 1.0;
   return box;
 }
@@ -4794,7 +4802,7 @@ IK_BOX_UPDATE(arrow)
       next = n->next;
       UI_Event *evt = &n->v;
 
-      if(evt->kind == UI_EventKind_Release && evt->key == OS_Key_LeftMouseButton)
+      if(evt->kind == UI_EventKind_Release && evt->key == WM_Key_LeftMouseButton)
       {
         is_focus_active = 0;
         ik_state->focus_active_box_key = ik_key_zero();
@@ -5039,7 +5047,7 @@ IK_BOX_DRAW(arrow)
 internal IK_Box *
 ik_arrow()
 {
-  IK_Box *box = ik_build_box_from_stringf(0, "arrow###%I64u", os_now_microseconds());
+  IK_Box *box = ik_build_box_from_stringf(0, "arrow###%I64u", now_time_us());
   box->flags = IK_BoxFlag_MouseClickable|
                IK_BoxFlag_ClickToFocus|
                IK_BoxFlag_DragToPosition|
@@ -5047,7 +5055,7 @@ ik_arrow()
                IK_BoxFlag_DrawArrow|
                IK_BoxFlag_DragPoint|
                IK_BoxFlag_DragToScalePoint;
-  box->hover_cursor = OS_Cursor_UpDownLeftRight;
+  box->hover_cursor = WM_Cursor_UpDownLeftRight;
   box->ratio = 1.0;
   // NOTE(k): it's a hack, in this case relative point pos is just absolute pos
   // after commited, we set box position based on bounds, then convert point pos to relative space 
@@ -5578,7 +5586,7 @@ ik_signal_from_box(IK_Box *box)
 {
   IK_Signal sig = {0};
   sig.box = box;
-  sig.event_flags |= os_get_modifiers();
+  sig.event_flags |= wm_get_modifiers();
   Rng2F32 rect = box->rect;
   B32 pixel_hot = ik_key_match(box->key, ik_state->pixel_hot_key);
 
@@ -5597,14 +5605,14 @@ ik_signal_from_box(IK_Box *box)
     // B32 evt_mouse_in_bounds = contains_2f32(rect, evt_mouse);
     B32 evt_mouse_in_bounds = pixel_hot;
     IK_MouseButtonKind evt_mouse_button_kind = 
-      evt->key == OS_Key_LeftMouseButton   ? IK_MouseButtonKind_Left   :
-      evt->key == OS_Key_RightMouseButton  ? IK_MouseButtonKind_Right  :
-      evt->key == OS_Key_MiddleMouseButton ? IK_MouseButtonKind_Middle :
+      evt->key == WM_Key_LeftMouseButton   ? IK_MouseButtonKind_Left   :
+      evt->key == WM_Key_RightMouseButton  ? IK_MouseButtonKind_Right  :
+      evt->key == WM_Key_MiddleMouseButton ? IK_MouseButtonKind_Middle :
       IK_MouseButtonKind_Left;
     B32 evt_key_is_mouse =
-      evt->key == OS_Key_LeftMouseButton  || 
-      evt->key == OS_Key_RightMouseButton ||
-      evt->key == OS_Key_MiddleMouseButton;
+      evt->key == WM_Key_LeftMouseButton  || 
+      evt->key == WM_Key_RightMouseButton ||
+      evt->key == WM_Key_MiddleMouseButton;
     sig.event_flags |= evt->modifiers;
 
     //- mouse pressed in box -> set hot/active, mark signal accordingly
@@ -5625,15 +5633,15 @@ ik_signal_from_box(IK_Box *box)
       }
 
       if(ik_key_match(box->key, ik_state->press_key_history[evt_mouse_button_kind][0]) &&
-         evt->timestamp_us-ik_state->press_timestamp_history_us[evt_mouse_button_kind][0] <= 1000000*os_get_gfx_info()->double_click_time)
+         evt->timestamp_us-ik_state->press_timestamp_history_us[evt_mouse_button_kind][0] <= 1000000*wm_get_system_info()->double_click_time)
       {
         sig.f |= (IK_SignalFlag_LeftDoubleClicked<<evt_mouse_button_kind);
       }
 
       if(ik_key_match(box->key, ik_state->press_key_history[evt_mouse_button_kind][0]) &&
          ik_key_match(box->key, ik_state->press_key_history[evt_mouse_button_kind][1]) &&
-         evt->timestamp_us-ik_state->press_timestamp_history_us[evt_mouse_button_kind][0] <= 1000000*os_get_gfx_info()->double_click_time &&
-         ik_state->press_timestamp_history_us[evt_mouse_button_kind][0] - ik_state->press_timestamp_history_us[evt_mouse_button_kind][1] <= 1000000*os_get_gfx_info()->double_click_time)
+         evt->timestamp_us-ik_state->press_timestamp_history_us[evt_mouse_button_kind][0] <= 1000000*wm_get_system_info()->double_click_time &&
+         ik_state->press_timestamp_history_us[evt_mouse_button_kind][0] - ik_state->press_timestamp_history_us[evt_mouse_button_kind][1] <= 1000000*wm_get_system_info()->double_click_time)
       {
         sig.f |= (IK_SignalFlag_LeftTripleClicked<<evt_mouse_button_kind);
       }
@@ -5684,11 +5692,11 @@ ik_signal_from_box(IK_Box *box)
     //- scroll
     if(box->flags & IK_BoxFlag_Scroll &&
        evt->kind == UI_EventKind_Scroll &&
-       evt->modifiers != OS_Modifier_Ctrl &&
+       evt->modifiers != WM_Modifier_Ctrl &&
        evt_mouse_in_bounds)
     {
       Vec2F32 delta = evt->delta_2f32;
-      if(evt->modifiers & OS_Modifier_Shift)
+      if(evt->modifiers & WM_Modifier_Shift)
       {
         Swap(F32, delta.x, delta.y);
       }
@@ -5704,7 +5712,7 @@ ik_signal_from_box(IK_Box *box)
 
     if(ik_key_match(ik_state->focus_hot_box_key[IK_MouseButtonKind_Left], box->key) &&
        evt->kind == UI_EventKind_Press &&
-       evt->key == OS_Key_Delete)
+       evt->key == WM_Key_Delete)
     {
       sig.f |= IK_SignalFlag_Delete;
       taken = 1;
@@ -6631,7 +6639,7 @@ ik_ui_selection(void)
           UI_Box *b;
           UI_Rect(rect)
             UI_Flags(UI_BoxFlag_DrawSideLeft|UI_BoxFlag_DrawSideTop|UI_BoxFlag_MouseClickable|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawHotEffects|UI_BoxFlag_DrawActiveEffects)
-            UI_HoverCursor(OS_Cursor_UpLeft)
+            UI_HoverCursor(WM_Cursor_DownRight)
             b = ui_build_box_from_stringf(0, "###top_left -> anchor");
           sig1 = ui_signal_from_box(b);
         }
@@ -6643,7 +6651,7 @@ ik_ui_selection(void)
           UI_Box *b;
           UI_Rect(rect)
             UI_Flags(UI_BoxFlag_MouseClickable|UI_BoxFlag_DrawSideTop|UI_BoxFlag_DrawSideBottom|UI_BoxFlag_DrawSideRight|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawHotEffects|UI_BoxFlag_DrawActiveEffects)
-            UI_HoverCursor(OS_Cursor_UpLeft)
+            UI_HoverCursor(WM_Cursor_DownRight)
             b = ui_build_box_from_stringf(0, "###top_left -> right");
           sig2 = ui_signal_from_box(b);
         }
@@ -6655,7 +6663,7 @@ ik_ui_selection(void)
           UI_Box *b;
           UI_Rect(rect)
             UI_Flags(UI_BoxFlag_MouseClickable|UI_BoxFlag_DrawSideLeft|UI_BoxFlag_DrawSideBottom|UI_BoxFlag_DrawSideRight|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawHotEffects|UI_BoxFlag_DrawActiveEffects)
-            UI_HoverCursor(OS_Cursor_UpLeft)
+            UI_HoverCursor(WM_Cursor_DownRight)
             b = ui_build_box_from_stringf(0, "##top_left -> down");
           sig3 = ui_signal_from_box(b);
         }
@@ -6745,7 +6753,7 @@ ik_ui_selection(void)
           UI_Box *b;
           UI_Rect(rect)
             UI_Flags(UI_BoxFlag_DrawSideBottom|UI_BoxFlag_DrawSideRight|UI_BoxFlag_MouseClickable|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawHotEffects|UI_BoxFlag_DrawActiveEffects)
-            UI_HoverCursor(OS_Cursor_DownRight)
+            UI_HoverCursor(WM_Cursor_DownRight)
             b = ui_build_box_from_stringf(0, "###bottom_right -> anchor");
           sig1 = ui_signal_from_box(b);
         }
@@ -6763,7 +6771,7 @@ ik_ui_selection(void)
           UI_Box *b;
           UI_Rect(rect)
             UI_Flags(UI_BoxFlag_DrawSideLeft|UI_BoxFlag_DrawSideBottom|UI_BoxFlag_DrawSideTop|UI_BoxFlag_MouseClickable|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawHotEffects|UI_BoxFlag_DrawActiveEffects)
-            UI_HoverCursor(OS_Cursor_DownRight)
+            UI_HoverCursor(WM_Cursor_DownRight)
             b = ui_build_box_from_stringf(0, "##bottom_right -> left");
           sig2 = ui_signal_from_box(b);
         }
@@ -6781,7 +6789,7 @@ ik_ui_selection(void)
           UI_Box *b;
           UI_Rect(rect)
             UI_Flags(UI_BoxFlag_DrawSideTop|UI_BoxFlag_DrawSideLeft|UI_BoxFlag_DrawSideRight|UI_BoxFlag_MouseClickable|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawHotEffects|UI_BoxFlag_DrawActiveEffects)
-            UI_HoverCursor(OS_Cursor_DownRight)
+            UI_HoverCursor(WM_Cursor_DownRight)
             b = ui_build_box_from_stringf(0, "##bottom_right -> up");
           sig3 = ui_signal_from_box(b);
         }
@@ -7879,7 +7887,7 @@ ik_ui_box_ctx_menu(void)
         B32 taken = 0;
         if(ui_clicked(ui_buttonf("copy")))
         {
-          os_set_clipboard_text(str8_lit(""));
+          wm_set_clipboard_text(str8_lit(""));
           ik_state->last_box_key_copied = box->key;
           taken = 1;
         }
@@ -7890,7 +7898,7 @@ ik_ui_box_ctx_menu(void)
         }
         if(box->flags&IK_BoxFlag_DrawImage && ui_clicked(ui_buttonf("export as png")))
         {
-          String8 binary_path = os_get_process_info()->binary_path; // only directory
+          String8 binary_path = get_process_info()->binary_path; // only directory
           String8 default_path = push_str8f(ik_frame_arena(), "%S/%I64u.png", binary_path, box->key.u64[0]);
 
           IK_Image *image = box->image;
@@ -7971,7 +7979,7 @@ ik_ui_g_ctx_menu()
           for(IK_ImageCacheNode *n = frame->image_cache_table[slot_idx].first; n != 0; n = n->next, count++)
           {
             IK_Image *image = &n->v;
-            String8 binary_path = os_get_process_info()->binary_path; // only directory
+            String8 binary_path = get_process_info()->binary_path; // only directory
             String8 default_path = push_str8f(ik_frame_arena(), "%S/%I64u.png", binary_path, image->key.u64[0]);
             ik_image_to_png_file(image, default_path);
           }
@@ -7984,7 +7992,7 @@ ik_ui_g_ctx_menu()
       {
         UI_Signal sig;
         ui_set_next_child_layout_axis(Axis2_X);
-        ui_set_next_hover_cursor(OS_Cursor_HandPoint);
+        ui_set_next_hover_cursor(WM_Cursor_HandPoint);
         UI_Box *b = ui_build_box_from_stringf(UI_BoxFlag_Clickable|
                                              UI_BoxFlag_DrawBackground|
                                              UI_BoxFlag_DrawBorder|
@@ -8114,7 +8122,7 @@ ik_ui_hsva_picker(String8 string, Vec4F32 *rgba)
   B32 is_focus_active_disabled = (!is_focus_active && ui_top_focus_active() == UI_FocusKind_On);
 
   UI_Signal sig = {0};
-  ui_set_next_hover_cursor(OS_Cursor_HandPoint);
+  ui_set_next_hover_cursor(WM_Cursor_HandPoint);
   UI_Parent(container)
     UI_Transparency(0)
     UI_Flags(UI_BoxFlag_DrawBorder|
@@ -8489,7 +8497,7 @@ ik_ui_slider_f32(String8 string, F32 *value, F32 px_to_val)
     UI_Flags(UI_BoxFlag_DrawBorder|UI_BoxFlag_Clickable|UI_BoxFlag_DrawBackground|UI_BoxFlag_DrawDropShadow|UI_BoxFlag_DrawText|UI_BoxFlag_DrawHotEffects|UI_BoxFlag_DrawActiveEffects)
     UI_PrefWidth(ui_text_dim(ui_top_font_size(), 1.0))
     UI_TextAlignment(UI_TextAlign_Center)
-    UI_HoverCursor(OS_Cursor_LeftRight)
+    UI_HoverCursor(WM_Cursor_LeftRight)
     container = ui_build_box_from_stringf(0, "%.2f###%S", *value, string);
 
   UI_Signal sig = ui_signal_from_box(container);
@@ -8743,7 +8751,7 @@ ik_multi_line_txt_op_from_event(Arena *arena, UI_Event *event, String8 string, T
   if(event->flags & UI_EventFlag_Paste)
   {
     range = txt_rng(cursor, mark);
-    replace = os_get_clipboard_text(arena);
+    replace = wm_get_clipboard_text(arena);
     next_cursor = next_mark = txt_pt(cursor.line, cursor.column+replace.size);
   }
 
@@ -9056,9 +9064,9 @@ THREAD_DISPATCH_TASK_FUNC(ik_save_frame__thread_entry)
   str8_list_concat_in_place(&fstrs, &yml_strs);
 
   String8 file_content = str8_list_join(scratch.arena, &fstrs, 0);
-  OS_Handle file = os_file_open(OS_AccessFlag_Write, packed_frame->save_path);
-  os_file_write(file, rng_1u64(0, file_content.size), file_content.str);
-  os_file_close(file);
+  File file = file_open(AccessFlag_Write, packed_frame->save_path);
+  file_write(file, rng_1u64(0, file_content.size), file_content.str);
+  file_close(file);
 
   scratch_end(scratch);
 }
@@ -9273,10 +9281,10 @@ ik_frame_to_tyml(IK_Frame *frame)
 
     ProfScope("Save tyml to file")
     {
-      OS_Handle file = os_file_open(OS_AccessFlag_Write, frame->save_path);
-      AssertAlways(!os_handle_match(file, os_handle_zero()));
-      os_file_write(file, rng_1u64(0, file_content.size), file_content.str);
-      os_file_close(file);
+      File file = file_open(AccessFlag_Write, frame->save_path);
+      AssertAlways(!file_match(file, file_zero()));
+      file_write(file, rng_1u64(0, file_content.size), file_content.str);
+      file_close(file);
     }
   }
 
@@ -9297,8 +9305,8 @@ ik_frame_from_tyml(String8 path)
   /////////////////////////////////
   //~ Read file
 
-  OS_Handle file = os_file_open(OS_AccessFlag_Read, (path));
-  FileProperties file_props = os_properties_from_file(file);
+  File file = file_open(AccessFlag_Read, (path));
+  FileProperties file_props = properties_from_file(file);
   U64 file_size = file_props.size;
 #if 0
   // @Performance(k): this is too slow for larger file (300MB = 90ms)
@@ -9306,8 +9314,8 @@ ik_frame_from_tyml(String8 path)
   ProfScope("FileRead") os_file_read(f, rng_1u64(0,size), data);
   os_file_close(f);
 #else
-  OS_Handle file_map = os_file_map_open(OS_AccessFlag_Read, file);
-  void *data = os_file_map_view_open(file_map, OS_AccessFlag_Read, rng_1u64(0, file_size));
+  FileMap file_map = file_map_open(AccessFlag_Read, file);
+  void *data = file_map_view_open(file_map, AccessFlag_Read, rng_1u64(0, file_size));
 #endif
 
   /////////////////////////////////
@@ -9434,6 +9442,7 @@ ik_frame_from_tyml(String8 path)
       Vec2U64 image_key = se_v2u64_from_tag(n, str8_lit("image"));
       if(image_key.x != 0)
       {
+        // box->hover_cursor = WM_Cursor_UpDownLeftRight;
         IK_Key key = ik_key_make(image_key.x, image_key.y);
         IK_Image *image = ik_image_from_key(key);
         if(image)
@@ -9479,9 +9488,9 @@ ik_frame_from_tyml(String8 path)
 
   ik_pop_frame();
   scratch_end(scratch);
-  os_file_map_view_close(file_map, data, r1u64(0, file_size));
-  os_file_map_close(file_map);
-  os_file_close(file);
+  file_map_view_close(file_map, data, r1u64(0, file_size));
+  file_map_close(file_map);
+  file_close(file);
   ProfEnd();
   return frame;
 }
@@ -9494,7 +9503,7 @@ ik_image_to_png_file(IK_Image *image, String8 path)
   // stbi_write_png((char const *)path.str, image->x, image->y, image->comp, (const void*)image->encoded.str, 0);
   if(image->encoded.size > 0)
   {
-    os_write_data_to_file_path(path, image->encoded);
+    write_data_to_file_path(path, image->encoded);
   }
 }
 

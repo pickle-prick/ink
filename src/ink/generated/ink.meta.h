@@ -220,7 +220,7 @@ typedef struct IK_StrokeColorNode IK_StrokeColorNode; struct IK_StrokeColorNode{
 typedef struct IK_TransparencyNode IK_TransparencyNode; struct IK_TransparencyNode{IK_TransparencyNode *next; F32 v;};
 typedef struct IK_PaletteNode IK_PaletteNode; struct IK_PaletteNode{IK_PaletteNode *next; IK_Palette*     v;};
 typedef struct IK_FlagsNode IK_FlagsNode; struct IK_FlagsNode{IK_FlagsNode *next; IK_BoxFlags v;};
-typedef struct IK_HoverCursorNode IK_HoverCursorNode; struct IK_HoverCursorNode{IK_HoverCursorNode *next; OS_Cursor v;};
+typedef struct IK_HoverCursorNode IK_HoverCursorNode; struct IK_HoverCursorNode{IK_HoverCursorNode *next; WM_Cursor v;};
 typedef struct IK_TextPaddingNode IK_TextPaddingNode; struct IK_TextPaddingNode{IK_TextPaddingNode *next; F32 v;};
 typedef struct IK_TextAlignmentNode IK_TextAlignmentNode; struct IK_TextAlignmentNode{IK_TextAlignmentNode *next; IK_TextAlign v;};
 #define IK_DeclStackNils \
@@ -257,7 +257,7 @@ state->stroke_color_nil_stack_top.v = rgba_from_u32(0xEEE6CAFF);\
 state->transparency_nil_stack_top.v = 0;\
 state->palette_nil_stack_top.v = 0;\
 state->flags_nil_stack_top.v = 0;\
-state->hover_cursor_nil_stack_top.v = OS_Cursor_Pointer;\
+state->hover_cursor_nil_stack_top.v = WM_Cursor_Pointer;\
 state->text_padding_nil_stack_top.v = 0;\
 state->text_alignment_nil_stack_top.v = IK_TextAlign_Left;\
 
@@ -277,7 +277,7 @@ struct { IK_StrokeColorNode *top; Vec4F32 bottom_val; IK_StrokeColorNode *free; 
 struct { IK_TransparencyNode *top; F32 bottom_val; IK_TransparencyNode *free; B32 auto_pop; } transparency_stack;\
 struct { IK_PaletteNode *top; IK_Palette*     bottom_val; IK_PaletteNode *free; B32 auto_pop; } palette_stack;\
 struct { IK_FlagsNode *top; IK_BoxFlags bottom_val; IK_FlagsNode *free; B32 auto_pop; } flags_stack;\
-struct { IK_HoverCursorNode *top; OS_Cursor bottom_val; IK_HoverCursorNode *free; B32 auto_pop; } hover_cursor_stack;\
+struct { IK_HoverCursorNode *top; WM_Cursor bottom_val; IK_HoverCursorNode *free; B32 auto_pop; } hover_cursor_stack;\
 struct { IK_TextPaddingNode *top; F32 bottom_val; IK_TextPaddingNode *free; B32 auto_pop; } text_padding_stack;\
 struct { IK_TextAlignmentNode *top; IK_TextAlign bottom_val; IK_TextAlignmentNode *free; B32 auto_pop; } text_alignment_stack;\
 }
@@ -295,7 +295,7 @@ state->stroke_color_stack.top = &state->stroke_color_nil_stack_top; state->strok
 state->transparency_stack.top = &state->transparency_nil_stack_top; state->transparency_stack.bottom_val = 0; state->transparency_stack.free = 0; state->transparency_stack.auto_pop = 0;\
 state->palette_stack.top = &state->palette_nil_stack_top; state->palette_stack.bottom_val = 0; state->palette_stack.free = 0; state->palette_stack.auto_pop = 0;\
 state->flags_stack.top = &state->flags_nil_stack_top; state->flags_stack.bottom_val = 0; state->flags_stack.free = 0; state->flags_stack.auto_pop = 0;\
-state->hover_cursor_stack.top = &state->hover_cursor_nil_stack_top; state->hover_cursor_stack.bottom_val = OS_Cursor_Pointer; state->hover_cursor_stack.free = 0; state->hover_cursor_stack.auto_pop = 0;\
+state->hover_cursor_stack.top = &state->hover_cursor_nil_stack_top; state->hover_cursor_stack.bottom_val = WM_Cursor_Pointer; state->hover_cursor_stack.free = 0; state->hover_cursor_stack.auto_pop = 0;\
 state->text_padding_stack.top = &state->text_padding_nil_stack_top; state->text_padding_stack.bottom_val = 0; state->text_padding_stack.free = 0; state->text_padding_stack.auto_pop = 0;\
 state->text_alignment_stack.top = &state->text_alignment_nil_stack_top; state->text_alignment_stack.bottom_val = IK_TextAlign_Left; state->text_alignment_stack.free = 0; state->text_alignment_stack.auto_pop = 0;\
 
@@ -330,7 +330,7 @@ internal Vec4F32                    ik_top_stroke_color(void);
 internal F32                        ik_top_transparency(void);
 internal IK_Palette*                ik_top_palette(void);
 internal IK_BoxFlags                ik_top_flags(void);
-internal OS_Cursor                  ik_top_hover_cursor(void);
+internal WM_Cursor                  ik_top_hover_cursor(void);
 internal F32                        ik_top_text_padding(void);
 internal IK_TextAlign               ik_top_text_alignment(void);
 internal IK_Frame *                 ik_bottom_frame(void);
@@ -346,7 +346,7 @@ internal Vec4F32                    ik_bottom_stroke_color(void);
 internal F32                        ik_bottom_transparency(void);
 internal IK_Palette*                ik_bottom_palette(void);
 internal IK_BoxFlags                ik_bottom_flags(void);
-internal OS_Cursor                  ik_bottom_hover_cursor(void);
+internal WM_Cursor                  ik_bottom_hover_cursor(void);
 internal F32                        ik_bottom_text_padding(void);
 internal IK_TextAlign               ik_bottom_text_alignment(void);
 internal IK_Frame *                 ik_push_frame(IK_Frame * v);
@@ -362,7 +362,7 @@ internal Vec4F32                    ik_push_stroke_color(Vec4F32 v);
 internal F32                        ik_push_transparency(F32 v);
 internal IK_Palette*                ik_push_palette(IK_Palette*     v);
 internal IK_BoxFlags                ik_push_flags(IK_BoxFlags v);
-internal OS_Cursor                  ik_push_hover_cursor(OS_Cursor v);
+internal WM_Cursor                  ik_push_hover_cursor(WM_Cursor v);
 internal F32                        ik_push_text_padding(F32 v);
 internal IK_TextAlign               ik_push_text_alignment(IK_TextAlign v);
 internal IK_Frame *                 ik_pop_frame(void);
@@ -378,7 +378,7 @@ internal Vec4F32                    ik_pop_stroke_color(void);
 internal F32                        ik_pop_transparency(void);
 internal IK_Palette*                ik_pop_palette(void);
 internal IK_BoxFlags                ik_pop_flags(void);
-internal OS_Cursor                  ik_pop_hover_cursor(void);
+internal WM_Cursor                  ik_pop_hover_cursor(void);
 internal F32                        ik_pop_text_padding(void);
 internal IK_TextAlign               ik_pop_text_alignment(void);
 internal IK_Frame *                 ik_set_next_frame(IK_Frame * v);
@@ -394,7 +394,7 @@ internal Vec4F32                    ik_set_next_stroke_color(Vec4F32 v);
 internal F32                        ik_set_next_transparency(F32 v);
 internal IK_Palette*                ik_set_next_palette(IK_Palette*     v);
 internal IK_BoxFlags                ik_set_next_flags(IK_BoxFlags v);
-internal OS_Cursor                  ik_set_next_hover_cursor(OS_Cursor v);
+internal WM_Cursor                  ik_set_next_hover_cursor(WM_Cursor v);
 internal F32                        ik_set_next_text_padding(F32 v);
 internal IK_TextAlign               ik_set_next_text_alignment(IK_TextAlign v);
 C_LINKAGE_BEGIN

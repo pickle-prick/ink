@@ -27,7 +27,7 @@
 
 // [h]
 #include "base/base_inc.h"
-#include "os/os_inc.h"
+#include "window_manager/window_manager_inc.h"
 #include "render/render_inc.h"
 #include "font_provider/font_provider_inc.h"
 #include "font_cache/font_cache.h"
@@ -48,7 +48,7 @@
 
 // [c]
 #include "base/base_inc.c"
-#include "os/os_inc.c"
+#include "window_manager/window_manager_inc.c"
 #include "render/render_inc.c"
 #include "font_provider/font_provider_inc.c"
 #include "font_cache/font_cache.c"
@@ -90,8 +90,8 @@ entry_point(CmdLine *cmd_line)
 
   // prepare window dim
   F32 ratio = 16.f/10.f;
-  OS_Handle monitor = os_primary_monitor();
-  Vec2F32 monitor_dim = os_dim_from_monitor(monitor);
+  WM_Monitor monitor = wm_primary_monitor();
+  Vec2F32 monitor_dim = wm_dim_from_monitor(monitor);
   Vec2F32 center = scale_2f32(monitor_dim, 0.5);
   Vec2F32 window_dim = {monitor_dim.y*0.6f*ratio, monitor_dim.y*0.6f};
   Vec2F32 half_window_dim = scale_2f32(window_dim, 0.5);
@@ -104,20 +104,20 @@ entry_point(CmdLine *cmd_line)
   String8 window_title = str8_lit(BUILD_TITLE);
 
   // open window
-  OS_Handle os_wnd = os_window_open(window_rect, 0, window_title);
-  os_window_first_paint(os_wnd);
-  os_window_focus(os_wnd);
+  WM_Window os_wnd = wm_window_open(window_rect, 0, window_title);
+  wm_window_first_paint(os_wnd);
+  wm_window_focus(os_wnd);
 
   // init main audio device
-#if OS_FEATURE_AUDIO
-  OS_Handle main_audio_device = os_audio_device_open();
-  os_set_main_audio_device(main_audio_device);
-  os_audio_device_start(main_audio_device);
-  os_audio_set_master_volume(0.9);
-#endif
+// #if OS_FEATURE_AUDIO
+//   OS_Handle main_audio_device = os_audio_device_open();
+//   os_set_main_audio_device(main_audio_device);
+//   os_audio_device_start(main_audio_device);
+//   os_audio_set_master_volume(0.9);
+// #endif
 
   // renderer initialization
-  r_init(os_wnd, R_RenderUsageFlag_Rect, BUILD_DEBUG);
+  r_init(os_wnd, R_RenderUsageFlag_Rect, 0);
   R_Handle r_wnd = r_window_equip(os_wnd);
 
   // init ui state
@@ -143,5 +143,5 @@ entry_point(CmdLine *cmd_line)
   ////////////////////////////////
   //~ Cleanup
 
-  os_window_close(os_wnd);
+  wm_window_close(os_wnd);
 }
