@@ -13,6 +13,17 @@ typedef enum IK_MouseButtonKind
 } IK_MouseButtonKind;
 
 ////////////////////////////////
+//~ Async Types
+
+typedef enum IK_AsyncTaskKind
+{
+  IK_AsyncTaskKind_Invalid = -1,
+  IK_AsyncTaskKind_LoadImage,
+  IK_AsyncTaskKind_SaveFrame,
+  IK_AsyncTaskKind_COUNT,
+} IK_AsyncTaskKind;
+
+////////////////////////////////
 //~ Tool Types
 
 typedef enum IK_ToolKind
@@ -218,9 +229,9 @@ struct IK_Image
   U64 y;
   U64 comp;
   U64 rc;
+  U64 gen;
 
   void *decoded; // pixel data
-  TD_Task *task;
 };
 
 typedef struct IK_ImageCacheNode IK_ImageCacheNode;
@@ -288,6 +299,52 @@ struct IK_Camera
 
   // pan stage
   B32 is_panning;
+};
+
+////////////////////////////////
+//~ TP Task
+
+typedef struct IK_MemoryCopyTPTask IK_MemoryCopyTPTask;
+struct IK_MemoryCopyTPTask
+{
+  void *dst;
+  void *src;
+  U64 copy_size;
+};
+
+////////////////////////////////
+//~ AsyncTask
+
+typedef struct IK_PackedFrame IK_PackedFrame;
+struct IK_PackedFrame
+{
+  SE_Node *root_node;
+  U8 *blob;
+  U64 blob_size;
+  String8 save_path;
+};
+
+typedef struct IK_AsyncTask IK_AsyncTask;
+struct IK_AsyncTask
+{
+  IK_AsyncTask *next;
+  IK_AsyncTask *prev;
+
+  IK_AsyncTaskKind kind;
+  TD_Task *dtask;
+
+  union
+  {
+    struct
+    {
+      IK_Image *image;
+    } load_image;
+
+    struct
+    {
+      IK_PackedFrame packed_frame;
+    } save_frame;
+  };
 };
 
 ////////////////////////////////
@@ -547,6 +604,7 @@ struct IK_Box
   Vec4F32 stroke_color;
   // image
   IK_Image *image;
+  U64 last_image_gen;
   // text
   String8 string;
   IK_FontSlot font_slot;
@@ -769,150 +827,161 @@ struct IK_SnapResult
 typedef struct IK_State IK_State;
 struct IK_State
 {
-  Arena                 *arena;
-  Arena                 *frame_arenas[2];
+  Arena                *arena;
+  Arena                *frame_arenas[2];
 
-  R_Handle              r_wnd;
-  OS_Handle             os_wnd;
-  UI_EventList          *events;
+  R_Handle             r_wnd;
+  OS_Handle            os_wnd;
+  UI_EventList         *events;
 
-  IK_SchemaTable        schema_table;
+  IK_SchemaTable       schema_table;
 
   // Debug
-  B32                   show_stats;
-  B32                   show_man_page;
+  B32                  show_stats;
+  B32                  show_man_page;
 
-  IK_Frame              *active_frame;
+  IK_Frame             *active_frame;
 
   // Drawing buckets
-  DR_Bucket             *bucket_ui;
-  DR_Bucket             *bucket_main;
-  DR_Bucket             *bucket_main_foreground;
+  DR_Bucket            *bucket_ui;
+  DR_Bucket            *bucket_main;
+  DR_Bucket            *bucket_main_foreground;
 
   // Drawlists
-  IK_DrawList           *drawlists[2];
+  IK_DrawList          *drawlists[2];
 
   // Frame history info
-  U64                   frame_index;
-  U64                   frame_time_us_history[64];
-  F64                   time_in_seconds;
-  U64                   time_in_us;
-  U64                   num_frames_requested;
-  B32                   is_animating;
+  U64                  frame_index;
+  U64                  frame_time_us_history[64];
+  F64                  time_in_seconds;
+  U64                  time_in_us;
+  U64                  num_frames_requested;
+  B32                  is_animating;
 
   // Frame parameters
-  F32                   frame_dt;
-  F32                   cpu_time_us;
-  F32                   pre_cpu_time_us;
-  F32                   target_hz;
+  F32                  frame_dt;
+  F32                  cpu_time_us;
+  F32                  pre_cpu_time_us;
+  F32                  target_hz;
 
   // Window
-  Rng2F32               window_rect;
-  Vec2F32               window_dim;
-  F32                   window_ratio;
-  Rng2F32               last_window_rect;
-  Vec2F32               last_window_dim;
-  B32                   window_res_changed;
-  F32                   dpi;
-  F32                   last_dpi;
-  B32                   window_should_close;
+  Rng2F32              window_rect;
+  Vec2F32              window_dim;
+  F32                  window_ratio;
+  Rng2F32              last_window_rect;
+  Vec2F32              last_window_dim;
+  B32                  window_res_changed;
+  F32                  dpi;
+  F32                  last_dpi;
+  B32                  window_should_close;
+
+  // TP
+  TP_Context           *tp_ctx;
+  TP_Arena             *tp_arena;
 
   // Task Queue
   TD_Queue             *task_queue;
+  Arena                *task_arena;
+  IK_AsyncTask         *first_async_task;
+  IK_AsyncTask         *last_async_task;
 
-  Arena                 *message_arena;
-  IK_MessageList        messages;
+  // Message Queue
+  Arena                *message_arena;
+  IK_MessageList       messages;
 
   // Camera
-  Mat4x4F32             proj_mat;
-  Mat4x4F32             proj_mat_inv;
-  F32                   screen_to_world_factor; // stw
-  F32                   world_to_screen_factor; // wts
+  Mat4x4F32            proj_mat;
+  Mat4x4F32            proj_mat_inv;
+  F32                  screen_to_world_factor; // stw
+  F32                  world_to_screen_factor; // wts
 
   // Mouse
-  Vec2F32               mouse;
-  Vec2F32               mouse_in_world;
-  Vec2F32               last_mouse;
-  Vec2F32               mouse_delta; // frame delta
-  Vec2F32               mouse_delta_in_world;
-  B32                   cursor_hidden;
+  Vec2F32              mouse;
+  Vec2F32              mouse_in_world;
+  Vec2F32              last_mouse;
+  Vec2F32              mouse_delta; // frame delta
+  Vec2F32              mouse_delta_in_world;
+  B32                  cursor_hidden;
 
   // Palette
   // IK_IconInfo           icon_info;
-  IK_WidgetPaletteInfo  widget_palette_info;
+  IK_WidgetPaletteInfo widget_palette_info;
 
   // User interaction state
-  B32                   ui_txt_editing;
-  IK_Key                hot_box_key;
-  IK_Key                active_box_key[IK_MouseButtonKind_COUNT];
-  IK_ActionSlot         action_slot;
-  IK_Key                focus_hot_box_key[IK_MouseButtonKind_COUNT];
-  IK_Key                focus_active_box_key;
-  IK_Key                pixel_hot_key; // hot pixel key from renderer
+  B32                  ui_txt_editing;
+  IK_Key               hot_box_key;
+  IK_Key               active_box_key[IK_MouseButtonKind_COUNT];
+  IK_ActionSlot        action_slot;
+  IK_Key               focus_hot_box_key[IK_MouseButtonKind_COUNT];
+  IK_Key               focus_active_box_key;
+  IK_Key               pixel_hot_key; // hot pixel key from renderer
 
-  U64                   press_timestamp_history_us[IK_MouseButtonKind_COUNT][3];
-  IK_Key                press_key_history[IK_MouseButtonKind_COUNT][3];
-  Vec2F32               press_pos_history[IK_MouseButtonKind_COUNT][3];
+  U64                  press_timestamp_history_us[IK_MouseButtonKind_COUNT][3];
+  IK_Key               press_key_history[IK_MouseButtonKind_COUNT][3];
+  Vec2F32              press_pos_history[IK_MouseButtonKind_COUNT][3];
 
-  B32                   g_ctx_menu_open;
-  Vec2F32               drag_start_mouse;
-  Arena                 *drag_state_arena;
-  String8               drag_state_data;
-  Arena                 *box_scratch_arena; // e.g. edit buffer
-  Rng2F32               selection_rect;
+  B32                  g_ctx_menu_open;
+  Vec2F32              drag_start_mouse;
+  Arena                *drag_state_arena;
+  String8              drag_state_data;
+  Arena                *box_scratch_arena; // e.g. edit buffer
+  Rng2F32              selection_rect;
   // Per-frame selection information
-  IK_Box                *first_box_selected;
-  IK_Box                *last_box_selected;
-  Rng2F32               selection_bounds;
-  U64                   selected_box_count;
+  IK_Box               *first_box_selected;
+  IK_Box               *last_box_selected;
+  Rng2F32              selection_bounds;
+  U64                  selected_box_count;
   // Clipboard
-  IK_Key                last_box_key_copied;
+  IK_Key               last_box_key_copied;
 
   // Toolbar
-  IK_ToolKind           tool;
+  IK_ToolKind          tool;
 
   // Drag/Drop state
-  IK_DragDropState      drag_drop_state;
-  U64                   drag_drop_slot;
-  void                  *drag_drop_src;
+  IK_DragDropState     drag_drop_state;
+  U64                  drag_drop_slot;
+  void                 *drag_drop_src;
 
   // Theme
-  IK_Theme              cfg_theme_target;
-  IK_Theme              cfg_theme;
-  FNT_Tag               cfg_font_tags[IK_FontSlot_COUNT];
+  IK_Theme             cfg_theme_target;
+  IK_Theme             cfg_theme;
+  FNT_Tag              cfg_font_tags[IK_FontSlot_COUNT];
 
   // Post effects
-  B32                   crt_enabled;
+  B32                  crt_enabled;
 
   // Palette
-  UI_Palette            cfg_ui_debug_palettes[IK_PaletteCode_COUNT]; // derivative from theme
-  IK_Palette            cfg_main_palettes[IK_PaletteCode_COUNT]; // derivative from theme
+  UI_Palette           cfg_ui_debug_palettes[IK_PaletteCode_COUNT]; // derivative from theme
+  IK_Palette           cfg_main_palettes[IK_PaletteCode_COUNT]; // derivative from theme
 
   // Global Settings
-  IK_SettingVal         setting_vals[IK_SettingCode_COUNT];
+  IK_SettingVal        setting_vals[IK_SettingCode_COUNT];
 
   // Edit buffer (since we can only have one focus active ui box at a time
   struct
   {
-    TxtPt cursor;
-    TxtPt mark;
-    U8 buffer[512];
-    U64 string_size;
-  } edit_buffer;
+    TxtPt              cursor;
+    TxtPt              mark;
+    U8                 buffer[512];
+    U64                string_size;
+  }                    edit_buffer;
 
   // animation
   struct
   {
-    F32 vast_rate;
-    F32 fast_rate;
-    F32 fish_rate;
-    F32 slow_rate;
-    F32 slug_rate;
-    F32 slaf_rate;
-  } animation;
+    F32                vast_rate;
+    F32                fast_rate;
+    F32                fish_rate;
+    F32                slow_rate;
+    F32                slug_rate;
+    F32                slaf_rate;
+  }                    animation;
 
-  // free stacks
-  IK_Frame *first_free_frame;
+  R_Handle             backup_texture;
+
+  // Free stacks
+  IK_Frame             *first_free_frame;
+  IK_AsyncTask         *first_free_async_task;
 
   IK_DeclStackNils;
   IK_DeclStacks;
@@ -1129,7 +1198,11 @@ internal IK_Image* ik_image_from_key(IK_Key key);
 internal IK_Image* ik_image_push(IK_Key key);
 
 /////////////////////////////////
-//~ Image Decode
+//~ Async Task
+
+internal IK_AsyncTask *ik_async_task_alloc();
+internal void          ik_async_task_release(IK_AsyncTask *task);
+internal void          ik_async_submit(IK_AsyncTask *task);
 
 internal void ik_image_decode_queue_push(IK_Image *image);
 
@@ -1179,8 +1252,10 @@ internal Rng1U64  ik_replace_range_from_txtrng(String8 string, TxtRng txt_rng);
 //~ Scene serialization/deserialization
 
 //- frame
-internal String8   ik_frame_to_tyml(IK_Frame *frame);
-internal IK_Frame* ik_frame_from_tyml(String8 path);
+internal IK_PackedFrame ik_packed_from_frame(Arena *arena, IK_Frame *frame);
+internal void           ik_save_frame_async();
+internal String8        ik_frame_to_tyml(IK_Frame *frame);
+internal IK_Frame*      ik_frame_from_tyml(String8 path);
 
 //- image
 internal void      ik_image_to_png_file(IK_Image *image, String8 path);

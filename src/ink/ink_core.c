@@ -580,6 +580,7 @@ ik_key_from_3f32(Vec3F32 key_3f32)
 internal void
 ik_init(OS_Handle os_wnd, R_Handle r_wnd)
 {
+  ProfBeginFunction();
   Arena *arena = arena_alloc();
   ik_state = push_array(arena, IK_State, 1);
   {
@@ -597,20 +598,17 @@ ik_init(OS_Handle os_wnd, R_Handle r_wnd)
     ik_state->box_scratch_arena = arena_alloc();
     ik_state->tool = IK_ToolKind_Selection;
     ik_state->message_arena = arena_alloc();
-    ik_state->task_queue = td_queue_alloc(2048, 4);
+    OS_SystemInfo *system_info = os_get_system_info();
+    ik_state->task_queue = td_queue_alloc(2048, ClampBot(1, os_get_system_info()->logical_processor_count-1));
+    ik_state->task_arena = arena_alloc();
+    ik_state->tp_ctx = tp_alloc(arena, os_get_system_info()->logical_processor_count-1, os_get_system_info()->logical_processor_count-1, str8_lit("main_tp"));
+    // ik_state->tp_arena = tp_arena_alloc(ik_state->tp_ctx);
 
-    // frame arena
+    // Frame arena
     for(U64 i = 0; i < ArrayCount(ik_state->frame_arenas); i++)
     {
       ik_state->frame_arenas[i] = arena_alloc(.reserve_size = MB(128), .commit_size = MB(8));
     }
-    // NOTE(k): not needed for now
-    // frame drawlists
-    // for(U64 i = 0; i < ArrayCount(ik_state->drawlists); i++)
-    // {
-    //   // TODO(k): some device offers 256MB memory which is both cpu visiable and device local
-    //   ik_state->drawlists[i] = ik_drawlist_alloc(arena, MB(16), MB(16));
-    // }
   }
 
   // Settings
@@ -787,8 +785,16 @@ ik_init(OS_Handle os_wnd, R_Handle r_wnd)
     }
   }
 
+  U32 backup_texture_data[] = {
+    0xFFFF00FF, 0xFF330033,
+    0xFF330033, 0xFFFF00FF,
+  };
+
+  ik_state->backup_texture = r_tex2d_alloc(R_ResourceKind_Static, R_Tex2DSampleKind_Nearest, v2s32(2,2), R_Tex2DFormat_RGBA8, backup_texture_data);
+
   IK_InitStacks(ik_state)
   IK_InitStackNils(ik_state)
+  ProfEnd();
 }
 
 //- key
@@ -838,8 +844,6 @@ ik_kill_focus(void)
 internal B32
 ik_frame(void)
 {
-  /////////////////////////////////
-
   ProfBeginFunction();
   Temp scratch = scratch_begin(0,0);
 
@@ -937,7 +941,7 @@ ik_frame(void)
   ik_state->animation.slug_rate = 1 - pow_f32(2, (-15.f * ik_state->frame_dt));
   ik_state->animation.slaf_rate = 1 - pow_f32(2, (-8.f  * ik_state->frame_dt));
 
-  // begin measuring actual per-frame work
+  // Begin measuring actual per-frame work
   U64 begin_time_us = os_now_microseconds();
 
   /////////////////////////////////
@@ -1425,6 +1429,61 @@ ik_frame(void)
   ik_state->mouse_delta_in_world.y = ik_state->mouse_delta.y*ik_state->screen_to_world_factor;
 
   frame->quadtree[0] = quadtree_push(ik_frame_arena(), ik_rect_from_camera_pos_zoom(camera->position, camera->zoom_factor));
+
+  ////////////////////////////////
+  //~ Process Dispatch Tasks
+
+  local_persist int max_image_upload_per_frame = 1;
+  int uploaded_image_count_this_frame = 0;
+  for(IK_AsyncTask *task = ik_state->first_async_task, *next = 0;
+      task != 0;
+      task = next)
+  {
+    next = task->next;
+    if(!td_task_is_done(task->dtask)) continue;
+
+    B32 ignore_this_frame = 0;
+    switch(task->kind)
+    {
+      case IK_AsyncTaskKind_LoadImage:
+      {
+        if(uploaded_image_count_this_frame+1 <= max_image_upload_per_frame)
+        {
+          uploaded_image_count_this_frame++;
+          IK_Image *image = task->load_image.image;
+          // Decode succeed
+          if(image->decoded)
+          {
+            // Upload to gpu
+            image->handle = r_tex2d_alloc(R_ResourceKind_Static, R_Tex2DSampleKind_Linear, v2s32(image->x, image->y), R_Tex2DFormat_RGBA8, (void*)image->decoded);
+            // Free stb artifacts
+            stbi_image_free(image->decoded);
+            image->decoded = 0;
+            image->gen++;
+          }
+        }
+        else
+        {
+          ignore_this_frame = 1;
+        }
+      }break;
+      case IK_AsyncTaskKind_SaveFrame:
+      {
+        ik_message_push(push_str8f(ik_frame_arena(), "Saved: %S", frame->save_path));
+      }break;
+      default:{InvalidPath;}break;
+    }
+
+    if(!ignore_this_frame)
+    {
+      DLLRemove(ik_state->first_async_task, ik_state->last_async_task, task);
+      ik_async_task_release(task);
+    }
+  }
+  if(ik_state->first_async_task == 0)
+  {
+    arena_clear(ik_state->task_arena);
+  }
 
   ////////////////////////////////
   //~ Main scene building
@@ -2351,8 +2410,8 @@ ik_frame(void)
 
     if(ui_key_press(OS_Modifier_Ctrl, OS_Key_S))
     {
-      ik_frame_to_tyml(frame);
-      ik_message_push(push_str8f(ik_frame_arena(), "saved: %S", frame->save_path));
+      ik_save_frame_async(frame);
+      ik_message_push(push_str8f(ik_frame_arena(), "Saving: %S", frame->save_path));
     }
 
     /////////////////////////////////
@@ -2510,35 +2569,23 @@ ik_frame(void)
           if((box->flags&IK_BoxFlag_DrawImage) && box->image && !zero_dim)
           {
             IK_Image *image = box->image;
-            // Image is just loaded? -> upload to gpu and free resource
-            if(image->task && td_task_is_done(image->task))
+
+            if(box->last_image_gen != image->gen)
             {
-              AssertAlways(r_handle_match(image->handle, r_handle_zero()));
-
-              // Decode succeed
-              if(image->decoded)
-              {
-                image->handle = r_tex2d_alloc(R_ResourceKind_Static, R_Tex2DSampleKind_Linear, v2s32(image->x, image->y), R_Tex2DFormat_RGBA8, (void*)image->decoded);
-
-                // Free stb artifacts
-                stbi_image_free(image->decoded);
-                image->decoded = 0;
-
-                // Resize box based on image dim
-                box->ratio = (F32)image->x/image->y;
-                box->rect_size.y = box->rect_size.x/box->ratio;
-              }
-
-              // Release Task
-              td_task_release(image->task);
-              image->task = 0;
+              box->last_image_gen = image->gen;
+              // Resize box based on image dim
+              box->ratio = (F32)image->x/image->y;
+              box->rect_size.y = box->rect_size.x/box->ratio;
             }
 
-            if(!r_handle_match(image->handle, r_handle_zero()))
+            R_Handle texture = image->handle;
+            Rng2F32 src = {0,0, box->image->x, box->image->y};
+            if(r_handle_match(image->handle, r_handle_zero()))
             {
-              Rng2F32 src = {0,0, box->image->x, box->image->y};
-              ik_dr_img_keyed(dst, src, image->handle, v4f32(1,1,1,1), 0, 0, 0, box->key_3f32);
+              texture = ik_state->backup_texture;
+              src = (Rng2F32){0,0, 2.0f, 2.0f};
             }
+            ik_dr_img_keyed(dst, src, texture, v4f32(1,1,1,1), 0, 0, 0, box->key_3f32);
           }
 
           // draw text
@@ -3382,6 +3429,7 @@ ik_drawlist_push_rect(Arena *arena, IK_DrawList *drawlist, Rng2F32 dst, Rng2F32 
 internal String8
 ik_push_str8_copy(String8 src)
 {
+  ProfBeginFunction();
   String8 ret = {0};
   if(src.size > 0)
   {
@@ -3390,6 +3438,7 @@ ik_push_str8_copy(String8 src)
     ret.size = src.size;
     ret.str[ret.size] = '\0';
   }
+  ProfEnd();
   return ret;
 }
 
@@ -3420,8 +3469,7 @@ ik_str8_new(U64 size)
   if(block == 0)
   {
     block = push_array(frame->arena, IK_StringBlock, 1);
-    // TODO: we can get away with no-zero
-    block->p = push_array_fat_sized(frame->arena, required_bytes, block);
+    block->p = push_array_fat_sized_no_zero(frame->arena, required_bytes, block);
     block->cap_bytes = required_bytes;
   }
 
@@ -3472,6 +3520,7 @@ ik_box_rec_df(IK_Box *box, IK_Box *root, U64 sib_member_off, U64 child_member_of
 internal IK_Frame *
 ik_frame_alloc()
 {
+  ProfBeginFunction();
   IK_Frame *frame = ik_state->first_free_frame;
   Temp scratch = scratch_begin(0,0);
   if(frame)
@@ -3549,6 +3598,7 @@ ik_frame_alloc()
   ik_pop_stroke_size();
   ik_pop_stroke_color();
   scratch_end(scratch);
+  ProfEnd();
   return frame;
 }
 
@@ -3919,7 +3969,7 @@ IK_BOX_UPDATE(text)
       if((op.flags&UI_TxtOpFlag_Copy) && op.copy.size != 0)
       {
         os_set_clipboard_text(op.copy);
-        ik_message_push(str8_lit("copied"));
+        ik_message_push(str8_lit("Copied"));
       }
 
       // commit op's changed cursor & mark to caller-provided state
@@ -5456,11 +5506,46 @@ ik_image_from_key(IK_Key key)
 }
 
 /////////////////////////////////
-//~ Image Decode Threads
+//~ Dispatch Task 
 
-THREAD_DISPATCH_TASK_FUNC(ik_image_decode)
+internal IK_AsyncTask *
+ik_async_task_alloc()
 {
-  IK_Image *image = task->userdata;
+  IK_AsyncTask *ret = ik_state->first_free_async_task;
+  if(ret == 0)
+  {
+    ret = push_array_no_zero(ik_state->arena, IK_AsyncTask, 1);
+  }
+  else
+  {
+    SLLStackPop(ik_state->first_free_async_task);
+  }
+
+  MemoryZeroStruct(ret);
+  ret->kind = IK_AsyncTaskKind_Invalid;
+  ret->dtask = td_task_alloc(ik_state->task_queue);
+  ret->dtask->userdata = ret;
+  return ret;
+}
+
+internal void
+ik_async_task_release(IK_AsyncTask *task)
+{
+  td_task_release(task->dtask);
+  SLLStackPush(ik_state->first_free_async_task, task);
+}
+
+internal void
+ik_async_task_submit(IK_AsyncTask *task)
+{
+  DLLPushBack(ik_state->first_async_task, ik_state->last_async_task, task);
+  td_task_submit(ik_state->task_queue, task->dtask);
+}
+
+THREAD_DISPATCH_TASK_FUNC(ik_image_decode__thread_entry)
+{
+  IK_AsyncTask *async_task = (IK_AsyncTask*)userdata;
+  IK_Image *image = async_task->load_image.image;
 
   int x = 0;
   int y = 0;
@@ -5478,12 +5563,11 @@ THREAD_DISPATCH_TASK_FUNC(ik_image_decode)
 internal void
 ik_image_decode_queue_push(IK_Image *image)
 {
-  TD_Task *task = td_task_alloc(ik_state->task_queue);
-  task->task_func = ik_image_decode;
-  task->userdata = image;
-  AssertAlways(image->task == 0);
-  image->task = task;
-  td_task_submit(ik_state->task_queue, task);
+  IK_AsyncTask *task = ik_async_task_alloc();
+  task->kind = IK_AsyncTaskKind_LoadImage;
+  task->load_image.image = image;
+  task->dtask->task_func = ik_image_decode__thread_entry;
+  ik_async_task_submit(task);
 }
 
 /////////////////////////////////
@@ -7874,8 +7958,8 @@ ik_ui_g_ctx_menu()
       // saving
       if(ui_clicked(ui_buttonf("save")))
       {
-        ik_frame_to_tyml(frame);
-        ik_message_push(push_str8f(ik_frame_arena(), "saved: %S", frame->save_path));
+        ik_save_frame_async(frame);
+        ik_message_push(push_str8f(ik_frame_arena(), "Saving: %S", frame->save_path));
         taken = 1;
       }
 
@@ -8764,13 +8848,21 @@ ik_replace_range_from_txtrng(String8 string, TxtRng txt_rng)
 
 //- frame 
 
-internal String8
-ik_frame_to_tyml(IK_Frame *frame)
+THREAD_POOL_TASK_FUNC(ik_memory_copy__thread_entry)
 {
-  String8 ret = frame->save_path;
-  Temp scratch = scratch_begin(0, 0);
+  IK_MemoryCopyTPTask *copy_tasks = raw_task;
+  IK_MemoryCopyTPTask *copy_task = &copy_tasks[task_id];
+  MemoryCopy(copy_task->dst, copy_task->src, copy_task->copy_size);
+}
 
-  se_build_begin(scratch.arena);
+internal IK_PackedFrame
+ik_packed_from_frame(Arena *arena, IK_Frame *frame)
+{
+  ProfBeginFunction();
+  IK_PackedFrame ret = {0};
+  Temp scratch = scratch_begin(&arena, 1);
+
+  se_build_begin(arena);
   SE_Node *root = se_struct();
 
   U8 *blob = 0;
@@ -8782,6 +8874,7 @@ ik_frame_to_tyml(IK_Frame *frame)
     /////////////////////////////////
     //~ Image bytes/blob
 
+    ProfScope("Packing Images")
     SE_Array_WithTag(str8_lit("images"))
     {
       // Dertermine blob size
@@ -8802,9 +8895,11 @@ ik_frame_to_tyml(IK_Frame *frame)
       if(blob_size_required > 0)
       {
         blob_cap = blob_size_required;
-        blob = push_array(scratch.arena, U8, blob_cap);
+        blob = push_array_no_zero(arena, U8, blob_cap);
       }
 
+      // Collect Memory Copy Tasks
+      IK_MemoryCopyTPTask *copy_tasks = 0;
       for(U64 i = 0; i < ArrayCount(frame->image_cache_table); i++)
       {
         IK_ImageCacheSlot *slot = &frame->image_cache_table[i];
@@ -8822,14 +8917,24 @@ ik_frame_to_tyml(IK_Frame *frame)
             se_u64_with_tag(str8_lit("head"), head);
             se_u64_with_tag(str8_lit("tail"), tail);
 
-
             U64 next_blob_size = blob_size + image->encoded.size;
             Assert(next_blob_size <= blob_cap);
 
-            MemoryCopy(blob+blob_size, image->encoded.str, image->encoded.size);
+            IK_MemoryCopyTPTask copy_task = {0};
+            copy_task.dst = blob+blob_size;
+            copy_task.src = image->encoded.str;
+            copy_task.copy_size = image->encoded.size;
+            darray_push(scratch.arena, copy_tasks, copy_task);
+            // MemoryCopy(blob+blob_size, image->encoded.str, image->encoded.size);
             blob_size = next_blob_size;
           }
         }
+      }
+
+      // Paralle for copying
+      if(darray_size(copy_tasks) > 0) ProfScope("Copy Image Bytes")
+      {
+        tp_for_parallel(ik_state->tp_ctx, 0, darray_size(copy_tasks), ik_memory_copy__thread_entry, copy_tasks);
       }
     }
 
@@ -8847,6 +8952,7 @@ ik_frame_to_tyml(IK_Frame *frame)
     /////////////////////////////////
     //~ Boxes
 
+    ProfScope("Packing Boxes")
     SE_Array_WithTag(str8_lit("boxes"))
     {
       for(IK_Box *box = frame->box_list.first; box != 0; box = box->list_next)
@@ -8920,12 +9026,225 @@ ik_frame_to_tyml(IK_Frame *frame)
     }
   }
   se_build_end();
+
+  // Fill & Return
+  ret.save_path = push_str8_copy(arena, frame->save_path);
+  ret.blob = blob;
+  ret.blob_size = blob_size;
+  ret.root_node = root;
+  scratch_end(scratch);
+  ProfEnd();
+  return ret;
+}
+
+THREAD_DISPATCH_TASK_FUNC(ik_save_frame__thread_entry)
+{
+  IK_AsyncTask *async_task = (IK_AsyncTask*)userdata;
+  IK_PackedFrame *packed_frame = &async_task->save_frame.packed_frame;
+
+  Temp scratch = scratch_begin(0,0);
+
+  String8List fstrs = {0};
+  // Header
+  str8_list_pushf(scratch.arena, &fstrs, "%I64u\n", packed_frame->blob_size);
+  // Blob
+  str8_list_push(scratch.arena, &fstrs, str8(packed_frame->blob, packed_frame->blob_size));
+  // New line
+  str8_list_push(scratch.arena, &fstrs, str8_lit("\n"));
+  // Write yml
+  String8List yml_strs = se_yml_node_to_strlist(scratch.arena, packed_frame->root_node);
+  str8_list_concat_in_place(&fstrs, &yml_strs);
+
+  String8 file_content = str8_list_join(scratch.arena, &fstrs, 0);
+  OS_Handle file = os_file_open(OS_AccessFlag_Write, packed_frame->save_path);
+  os_file_write(file, rng_1u64(0, file_content.size), file_content.str);
+  os_file_close(file);
+
+  scratch_end(scratch);
+}
+
+internal void
+ik_save_frame_async(IK_Frame *frame)
+{
+  IK_AsyncTask *task = ik_async_task_alloc();
+  task->kind = IK_AsyncTaskKind_SaveFrame;
+
+  task->save_frame.packed_frame = ik_packed_from_frame(ik_state->task_arena, frame);
+  task->dtask->task_func = ik_save_frame__thread_entry;
+
+  ik_async_task_submit(task);
+}
+
+// @Deprecated
+internal String8
+ik_frame_to_tyml(IK_Frame *frame)
+{
+  ProfBeginFunction();
+  String8 ret = frame->save_path;
+  Temp scratch = scratch_begin(0, 0);
+
+  se_build_begin(scratch.arena);
+  SE_Node *root = se_struct();
+
+  U8 *blob = 0;
+  U64 blob_size = 0;
+  U64 blob_cap = 0;
+
+  SE_Parent(root)
+  {
+    /////////////////////////////////
+    //~ Image bytes/blob
+
+    ProfScope("Packing Images")
+    SE_Array_WithTag(str8_lit("images"))
+    {
+      // Dertermine blob size
+      U64 blob_size_required = 0;
+      for(U64 i = 0; i < ArrayCount(frame->image_cache_table); i++)
+      {
+        IK_ImageCacheSlot *slot = &frame->image_cache_table[i];
+        for(IK_ImageCacheNode *n = slot->first; n != 0; n = n->next)
+        {
+          IK_Image *image = &n->v;
+          if(image->rc > 0)
+          {
+            blob_size_required += image->encoded.size;
+          }
+        }
+      }
+
+      if(blob_size_required > 0)
+      {
+        blob_cap = blob_size_required;
+        blob = push_array_no_zero(scratch.arena, U8, blob_cap);
+      }
+
+      for(U64 i = 0; i < ArrayCount(frame->image_cache_table); i++)
+      {
+        IK_ImageCacheSlot *slot = &frame->image_cache_table[i];
+        for(IK_ImageCacheNode *n = slot->first; n != 0; n = n->next)
+        {
+          IK_Image *image = &n->v;
+          if(image->rc > 0) SE_Struct()
+          {
+            se_v2u64_with_tag(str8_lit("key"), v2u64(image->key.u64[0], image->key.u64[1]));
+            se_u64_with_tag(str8_lit("x"), image->x);
+            se_u64_with_tag(str8_lit("y"), image->y);
+
+            U64 head = blob_size;
+            U64 tail = head+image->encoded.size;
+            se_u64_with_tag(str8_lit("head"), head);
+            se_u64_with_tag(str8_lit("tail"), tail);
+
+            U64 next_blob_size = blob_size + image->encoded.size;
+            Assert(next_blob_size <= blob_cap);
+
+            MemoryCopy(blob+blob_size, image->encoded.str, image->encoded.size);
+
+            blob_size = next_blob_size;
+          }
+        }
+      }
+    }
+
+    /////////////////////////////////
+    //~ Frame info
+
+    // Camera
+    SE_Struct_WithTag(str8_lit("camera"))
+    {
+      IK_Camera *camera = &frame->camera;
+      se_v2f32_with_tag(str8_lit("position"), camera->position);
+      se_f32_with_tag(str8_lit("zoom_factor"), camera->zoom_factor);
+    }
+
+    /////////////////////////////////
+    //~ Boxes
+
+    ProfScope("Packing Boxes")
+    SE_Array_WithTag(str8_lit("boxes"))
+    {
+      for(IK_Box *box = frame->box_list.first; box != 0; box = box->list_next)
+      {
+        // NOTE(k): current only select and root box has IK_BoxFlag_Transient flags, and we won't pass them here
+        AssertAlways(!(box->flags&IK_BoxFlag_Transient));
+        // @FIXME(k): Not finishd yet, assume flatten boxes for now
+        IK_Box *parent = 0;
+        if(parent && !(parent->flags&IK_BoxFlag_Transient))
+        {
+          parent = box->parent;
+        }
+
+        if(box->flags&IK_BoxFlag_Deleted) continue;
+
+        SE_Struct()
+        {
+          /////////////////////////////////
+          // Basic
+
+          se_v2u64_with_tag(str8_lit("key"), v2u64(box->key.u64[0], box->key.u64[1]));
+          if(parent) se_v2u64_with_tag(str8_lit("parent"), v2u64(parent->key.u64[0], parent->key.u64[1]));
+          se_str_with_tag(str8_lit("name"), box->name);
+          se_u64_with_tag(str8_lit("flags"), box->flags);
+          se_v2f32_with_tag(str8_lit("position"), box->position);
+          se_f32_with_tag(str8_lit("rotation"), box->rotation);
+          se_v2f32_with_tag(str8_lit("rect_size"), box->rect_size);
+          se_v4f32_with_tag(str8_lit("background_color"), box->background_color);
+          se_v4f32_with_tag(str8_lit("text_color"), box->text_color);
+          se_v4f32_with_tag(str8_lit("border_color"), box->border_color);
+          se_v4f32_with_tag(str8_lit("stroke_color"), box->stroke_color);
+          se_f32_with_tag(str8_lit("ratio"), box->ratio);
+          se_u64_with_tag(str8_lit("hover_cursor"), box->hover_cursor);
+          se_f32_with_tag(str8_lit("transparency"), box->transparency);
+          se_f32_with_tag(str8_lit("stroke_size"), box->stroke_size);
+
+          /////////////////////////////////
+          // Image
+
+          if(box->image)
+          {
+            se_v2u64_with_tag(str8_lit("image"), v2u64(box->image->key.u64[0], box->image->key.u64[1]));
+          }
+
+          /////////////////////////////////
+          // Text
+
+          if(box->string.size > 0) se_multiline_str_with_tag(str8_lit("string"), box->string);
+          se_f32_with_tag(str8_lit("font_size"), box->font_size);
+          se_u64_with_tag(str8_lit("font_slot"), box->font_slot);
+          se_f32_with_tag(str8_lit("tab_size"), box->tab_size);
+          se_u64_with_tag(str8_lit("text_raster_flags"), box->text_raster_flags);
+          se_f32_with_tag(str8_lit("text_padding"), box->text_padding);
+          se_u64_with_tag(str8_lit("text_align"), box->text_align);
+
+          /////////////////////////////////
+          // Points
+
+          if(box->first_point != 0)
+          {
+            SE_Array_WithTag(str8_lit("points"))
+            {
+              for(IK_Point *p = box->first_point; p != 0; p = p->next)
+              {
+                se_v2f32(p->position);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  se_build_end();
+
+  ProfBegin("yml node to strlist");
   String8List strs = se_yml_node_to_strlist(scratch.arena, root);
+  ProfEnd();
 
   /////////////////////////////////
   // Backup
 
-  if(!frame->did_backup)
+  // @FIXME(k): move this to some offload thread or at the startup 
+  ProfScope("Backup") if(!frame->did_backup)
   {
     String8 backup = push_str8f(scratch.arena, "%S.bak", frame->save_path);
     os_copy_file_path(backup, frame->save_path);
@@ -8948,21 +9267,28 @@ ik_frame_to_tyml(IK_Frame *frame)
     str8_list_concat_in_place(&fstrs, &strs);
 
     // StrList -> String
+    ProfBegin("StrList -> String");
     String8 file_content = str8_list_join(scratch.arena, &fstrs, 0);
+    ProfEnd();
 
-    OS_Handle file = os_file_open(OS_AccessFlag_Write, frame->save_path);
-    AssertAlways(!os_handle_match(file, os_handle_zero()));
-    os_file_write(file, rng_1u64(0, file_content.size), file_content.str);
-    os_file_close(file);
+    ProfScope("Save tyml to file")
+    {
+      OS_Handle file = os_file_open(OS_AccessFlag_Write, frame->save_path);
+      AssertAlways(!os_handle_match(file, os_handle_zero()));
+      os_file_write(file, rng_1u64(0, file_content.size), file_content.str);
+      os_file_close(file);
+    }
   }
 
   scratch_end(scratch);
+  ProfEnd();
   return ret;
 }
 
 internal IK_Frame *
 ik_frame_from_tyml(String8 path)
 {
+  ProfBeginFunction();
   IK_Frame *frame = ik_frame_alloc();
   Arena *arena = frame->arena;
   Temp scratch = scratch_begin(0,0);
@@ -8971,18 +9297,24 @@ ik_frame_from_tyml(String8 path)
   /////////////////////////////////
   //~ Read file
 
-  OS_Handle f = os_file_open(OS_AccessFlag_Read, (path));
-  FileProperties f_props = os_properties_from_file(f);
-  U64 size = f_props.size;
-  U8 *data = push_array(scratch.arena, U8, f_props.size);
-  os_file_read(f, rng_1u64(0,size), data);
+  OS_Handle file = os_file_open(OS_AccessFlag_Read, (path));
+  FileProperties file_props = os_properties_from_file(file);
+  U64 file_size = file_props.size;
+#if 0
+  // @Performance(k): this is too slow for larger file (300MB = 90ms)
+  U8 *data = push_array_no_zero(scratch.arena, U8, f_props.size);
+  ProfScope("FileRead") os_file_read(f, rng_1u64(0,size), data);
   os_file_close(f);
+#else
+  OS_Handle file_map = os_file_map_open(OS_AccessFlag_Read, file);
+  void *data = os_file_map_view_open(file_map, OS_AccessFlag_Read, rng_1u64(0, file_size));
+#endif
 
   /////////////////////////////////
   //~ Load blob
 
   U8 *c = data;
-  U8 *opl = c+size;
+  U8 *opl = c+file_size;
   // read header
   for(; c < opl && *c != '\n'; c++);
   String8 header = str8_range(data, c);
@@ -9017,8 +9349,10 @@ ik_frame_from_tyml(String8 path)
   //~ Load images
 
   SE_Node *first_image_node = se_arr_from_tag(se_node, str8_lit("images"));
-  ProfScope("load images")
+  ProfScope("Load Images")
   {
+    IK_MemoryCopyTPTask *copy_tasks = 0;
+    IK_Image **image_ptrs = 0;
     for(SE_Node *n = first_image_node; n != 0; n = n->next)
     {
       Vec2U64 key_src = se_v2u64_from_tag(n, str8_lit("key"));
@@ -9027,8 +9361,23 @@ ik_frame_from_tyml(String8 path)
       U64 tail = se_u64_from_tag(n, str8_lit("tail"));
       String8 image_blob = str8_range(blob.str+head, blob.str+tail);
       IK_Image *image = ik_image_push(key);
-      image->encoded = ik_push_str8_copy(image_blob);
-      ik_image_decode_queue_push(image);
+      // image->encoded = ik_push_str8_copy(image_blob);
+      image->encoded = ik_str8_new(image_blob.size);
+
+      IK_MemoryCopyTPTask copy_task = {0};
+      copy_task.dst = image->encoded.str;
+      copy_task.src = image_blob.str;
+      copy_task.copy_size = image_blob.size;
+      darray_push(scratch.arena, copy_tasks, copy_task);
+      darray_push(scratch.arena, image_ptrs, image);
+    }
+    if(darray_size(copy_tasks) > 0) ProfScope("Copy Image Bytes")
+    {
+      tp_for_parallel(ik_state->tp_ctx, 0, darray_size(copy_tasks), ik_memory_copy__thread_entry, copy_tasks);
+    }
+    for(U64 i = 0; i < darray_size(image_ptrs); ++i)
+    {
+      ik_image_decode_queue_push(image_ptrs[i]);
     }
   }
 
@@ -9130,6 +9479,10 @@ ik_frame_from_tyml(String8 path)
 
   ik_pop_frame();
   scratch_end(scratch);
+  os_file_map_view_close(file_map, data, r1u64(0, file_size));
+  os_file_map_close(file_map);
+  os_file_close(file);
+  ProfEnd();
   return frame;
 }
 

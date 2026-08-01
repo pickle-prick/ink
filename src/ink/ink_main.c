@@ -117,7 +117,7 @@ entry_point(CmdLine *cmd_line)
 #endif
 
   // renderer initialization
-  r_init(os_wnd, 0);
+  r_init(os_wnd, R_RenderUsageFlag_Rect, BUILD_DEBUG);
   R_Handle r_wnd = r_window_equip(os_wnd);
 
   // init ui state
