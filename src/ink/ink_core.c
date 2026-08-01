@@ -597,12 +597,7 @@ ik_init(OS_Handle os_wnd, R_Handle r_wnd)
     ik_state->box_scratch_arena = arena_alloc();
     ik_state->tool = IK_ToolKind_Selection;
     ik_state->message_arena = arena_alloc();
-    // decode queue & threads
-    ik_state->decode_queue.semaphore = semaphore_alloc(0, ArrayCount(ik_state->decode_queue.queue), str8_lit(""));
-    for(U64 i = 0; i < ArrayCount(ik_state->decode_threads); i++)
-    {
-      ik_state->decode_threads[i] = os_thread_launch(ik_image_decode_thread__entry_point, &ik_state->decode_queue, 0);
-    }
+    ik_state->task_queue = td_queue_alloc(2048, 4);
 
     // frame arena
     for(U64 i = 0; i < ArrayCount(ik_state->frame_arenas); i++)
@@ -2515,34 +2510,34 @@ ik_frame(void)
           if((box->flags&IK_BoxFlag_DrawImage) && box->image && !zero_dim)
           {
             IK_Image *image = box->image;
-            if(!image->loaded)
+            // Image is just loaded? -> upload to gpu and free resource
+            if(image->task && td_task_is_done(image->task))
             {
               AssertAlways(r_handle_match(image->handle, r_handle_zero()));
-              // work done by decode thread
-              if(!ins_atomic_u64_eval(&image->loading))
+
+              // Decode succeed
+              if(image->decoded)
               {
-                image->loaded = 1;
+                image->handle = r_tex2d_alloc(R_ResourceKind_Static, R_Tex2DSampleKind_Linear, v2s32(image->x, image->y), R_Tex2DFormat_RGBA8, (void*)image->decoded);
 
-                // decode succeed
-                if(image->decoded)
-                {
-                  image->handle = r_tex2d_alloc(R_ResourceKind_Static, R_Tex2DSampleKind_Linear, v2s32(image->x, image->y), R_Tex2DFormat_RGBA8, (void*)image->decoded);
+                // Free stb artifacts
+                stbi_image_free(image->decoded);
+                image->decoded = 0;
 
-                  // free stb artifacts
-                  stbi_image_free(image->decoded);
-                  image->decoded = 0;
-
-                  // resize box based on image dim
-                  box->ratio = (F32)image->x/image->y;
-                  box->rect_size.y = box->rect_size.x/box->ratio;
-                }
+                // Resize box based on image dim
+                box->ratio = (F32)image->x/image->y;
+                box->rect_size.y = box->rect_size.x/box->ratio;
               }
+
+              // Release Task
+              td_task_release(image->task);
+              image->task = 0;
             }
 
-            if(image->loaded)
+            if(!r_handle_match(image->handle, r_handle_zero()))
             {
               Rng2F32 src = {0,0, box->image->x, box->image->y};
-              ik_dr_img_keyed(dst, src, box->image->handle, v4f32(1,1,1,1), 0, 0, 0, box->key_3f32);
+              ik_dr_img_keyed(dst, src, image->handle, v4f32(1,1,1,1), 0, 0, 0, box->key_3f32);
             }
           }
 
@@ -5463,55 +5458,32 @@ ik_image_from_key(IK_Key key)
 /////////////////////////////////
 //~ Image Decode Threads
 
-internal void
-ik_image_decode_thread__entry_point(void *ptr)
+THREAD_DISPATCH_TASK_FUNC(ik_image_decode)
 {
-  ThreadNameF("[ik] image decode thread");
+  IK_Image *image = task->userdata;
 
-  IK_ImageDecodeQueue *queue = (IK_ImageDecodeQueue*)ptr;
-  for(;;)
+  int x = 0;
+  int y = 0;
+  int z = 0;
+  U8 *data = stbi_load_from_memory(image->encoded.str, image->encoded.size, &x, &y, &z, 4); // this is image data (U32 -> RBGA)
+  if(data)
   {
-    semaphore_take(queue->semaphore, max_U64);
-    // TODO(Next): wrap cursor too, otherwise cursor could max out max_U64
-    U64 index = (ins_atomic_u64_inc_eval(&queue->cursor)-1)%ArrayCount(queue->queue);
-    IK_Image *image = queue->queue[index];
-
-    AssertAlways(!image->loaded);
-
-    int x = 0;
-    int y = 0;
-    int z = 0;
-    U8 *data = stbi_load_from_memory(image->encoded.str, image->encoded.size, &x, &y, &z, 4); // this is image data (U32 -> RBGA)
-    if(data)
-    {
-      image->x = x;
-      image->y = y;
-      image->comp = z;
-      image->decoded = data;
-    }
-
-    // NOTE(k): we might need a write barrier here (cpu+compiler) to ensure all therads can see the writes above
-    // or we could just use atom_store
-    // #include <stdatomic.h>
-    // atomic_thread_fence(memory_order_release);
-    ins_atomic_u64_eval_assign(&image->loading, 0);
-    ins_atomic_u64_dec_eval(&queue->queue_count);
+    image->x = x;
+    image->y = y;
+    image->comp = z;
+    image->decoded = data;
   }
 }
 
 internal void
 ik_image_decode_queue_push(IK_Image *image)
 {
-  IK_ImageDecodeQueue *queue = &ik_state->decode_queue;
-  for(;queue->queue_count >= ArrayCount(queue->queue);) {}
-
-  image->loading = 1;
-  U64 next_mark = (queue->mark+1)%ArrayCount(queue->queue);
-  queue->queue[queue->mark] = image;
-  ins_atomic_u64_inc_eval(&queue->queue_count);
-  queue->mark = next_mark;
-  // NOTE(k): we might not need a write barrier(compiler+cpu), since semaphore could have fence itself
-  semaphore_drop(ik_state->decode_queue.semaphore);
+  TD_Task *task = td_task_alloc(ik_state->task_queue);
+  task->task_func = ik_image_decode;
+  task->userdata = image;
+  AssertAlways(image->task == 0);
+  image->task = task;
+  td_task_submit(ik_state->task_queue, task);
 }
 
 /////////////////////////////////
@@ -6793,14 +6765,14 @@ ik_ui_selection(void)
                   Rng2F32 rect_after_scale = new_rect;
 
                   IK_SnapResult snap_results[Axis2_COUNT] = {0};
-                  for(Axis2 axis = Axis2_X; axis < DirH_COUNT; ++axis)
+                  for(Axis2 axis = Axis2_X; axis < Axis2_COUNT; ++axis)
                   {
                     // Right or Down
                     Dir2 direction = axis + 2;
                     snap_results[axis] = ik_snapped_from_box_rect(rect_after_scale, direction, box);
                   }
 
-                  for(Axis2 axis = Axis2_X; axis < DirH_COUNT; ++axis)
+                  for(Axis2 axis = Axis2_X; axis < Axis2_COUNT; ++axis)
                   {
                     // Right or Down
                     Dir2 direction = axis + 2;
@@ -8808,10 +8780,31 @@ ik_frame_to_tyml(IK_Frame *frame)
   SE_Parent(root)
   {
     /////////////////////////////////
-    // Image cache
+    //~ Image bytes/blob
 
     SE_Array_WithTag(str8_lit("images"))
     {
+      // Dertermine blob size
+      U64 blob_size_required = 0;
+      for(U64 i = 0; i < ArrayCount(frame->image_cache_table); i++)
+      {
+        IK_ImageCacheSlot *slot = &frame->image_cache_table[i];
+        for(IK_ImageCacheNode *n = slot->first; n != 0; n = n->next)
+        {
+          IK_Image *image = &n->v;
+          if(image->rc > 0)
+          {
+            blob_size_required += image->encoded.size;
+          }
+        }
+      }
+
+      if(blob_size_required > 0)
+      {
+        blob_cap = blob_size_required;
+        blob = push_array(scratch.arena, U8, blob_cap);
+      }
+
       for(U64 i = 0; i < ArrayCount(frame->image_cache_table); i++)
       {
         IK_ImageCacheSlot *slot = &frame->image_cache_table[i];
@@ -8829,28 +8822,21 @@ ik_frame_to_tyml(IK_Frame *frame)
             se_u64_with_tag(str8_lit("head"), head);
             se_u64_with_tag(str8_lit("tail"), tail);
 
-            U64 size_required = blob_size+image->encoded.size;
-            if(size_required > blob_cap)
-            {
-              U64 new_cap = size_required*2;
-              U8 *next_blob = push_array(scratch.arena, U8, new_cap);
-              MemoryCopy(next_blob, blob, blob_size);
 
-              blob_cap = new_cap;
-              blob = next_blob;
-            }
+            U64 next_blob_size = blob_size + image->encoded.size;
+            Assert(next_blob_size <= blob_cap);
 
             MemoryCopy(blob+blob_size, image->encoded.str, image->encoded.size);
-            blob_size += image->encoded.size;
+            blob_size = next_blob_size;
           }
         }
       }
     }
 
     /////////////////////////////////
-    // Frame info
+    //~ Frame info
 
-    // camera
+    // Camera
     SE_Struct_WithTag(str8_lit("camera"))
     {
       IK_Camera *camera = &frame->camera;
@@ -8859,7 +8845,7 @@ ik_frame_to_tyml(IK_Frame *frame)
     }
 
     /////////////////////////////////
-    // Box
+    //~ Boxes
 
     SE_Array_WithTag(str8_lit("boxes"))
     {
@@ -8867,6 +8853,7 @@ ik_frame_to_tyml(IK_Frame *frame)
       {
         // NOTE(k): current only select and root box has IK_BoxFlag_Transient flags, and we won't pass them here
         AssertAlways(!(box->flags&IK_BoxFlag_Transient));
+        // @FIXME(k): Not finishd yet, assume flatten boxes for now
         IK_Box *parent = 0;
         if(parent && !(parent->flags&IK_BoxFlag_Transient))
         {
@@ -8948,28 +8935,24 @@ ik_frame_to_tyml(IK_Frame *frame)
   /////////////////////////////////
   // Write to file
 
+  // @Performance(k): use one os_file_write call, join all string in memory first
   {
-    U64 c = 0;
+    String8List fstrs = {0};
+    // Header
+    str8_list_pushf(scratch.arena, &fstrs, "%I64u\n", blob_size);
+    // Blob
+    str8_list_push(scratch.arena, &fstrs, str8(blob,blob_size));
+    // New line
+    str8_list_push(scratch.arena, &fstrs, str8_lit("\n"));
+    // Write yml
+    str8_list_concat_in_place(&fstrs, &strs);
+
+    // StrList -> String
+    String8 file_content = str8_list_join(scratch.arena, &fstrs, 0);
+
     OS_Handle file = os_file_open(OS_AccessFlag_Write, frame->save_path);
-    Assert(!os_handle_match(file, os_handle_zero()));
-
-    // write header
-    String8 header = push_str8f(scratch.arena, "%I64u\n", blob_size);
-    os_file_write(file, rng_1u64(c, c+header.size), header.str);
-    c+=header.size;
-
-    // write blob
-    os_file_write(file, rng_1u64(c, c+blob_size), blob);
-    c+=blob_size;
-    // write a new line
-    os_file_write(file, rng_1u64(c, c+1), "\n");
-    c+=1;
-    // write yml
-    for(String8Node *n = strs.first; n != 0; n = n->next)
-    {
-      os_file_write(file, rng_1u64(c, c+n->string.size), n->string.str);
-      c+=n->string.size;
-    }
+    AssertAlways(!os_handle_match(file, os_handle_zero()));
+    os_file_write(file, rng_1u64(0, file_content.size), file_content.str);
     os_file_close(file);
   }
 

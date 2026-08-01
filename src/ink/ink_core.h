@@ -220,8 +220,7 @@ struct IK_Image
   U64 rc;
 
   void *decoded; // pixel data
-  B32 loading; // initial set by main thread, later set by worker thread
-  B32 loaded; // set by main thread
+  TD_Task *task;
 };
 
 typedef struct IK_ImageCacheNode IK_ImageCacheNode;
@@ -818,7 +817,9 @@ struct IK_State
   F32                   last_dpi;
   B32                   window_should_close;
 
-  // Messages
+  // Task Queue
+  TD_Queue             *task_queue;
+
   Arena                 *message_arena;
   IK_MessageList        messages;
 
@@ -835,10 +836,6 @@ struct IK_State
   Vec2F32               mouse_delta; // frame delta
   Vec2F32               mouse_delta_in_world;
   B32                   cursor_hidden;
-
-  // Image decode queue & threads
-  IK_ImageDecodeQueue   decode_queue;
-  OS_Handle             decode_threads[4];
 
   // Palette
   // IK_IconInfo           icon_info;
@@ -1134,7 +1131,6 @@ internal IK_Image* ik_image_push(IK_Key key);
 /////////////////////////////////
 //~ Image Decode
 
-internal void ik_image_decode_thread__entry_point(void *ptr);
 internal void ik_image_decode_queue_push(IK_Image *image);
 
 /////////////////////////////////
