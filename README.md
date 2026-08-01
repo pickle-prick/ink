@@ -33,7 +33,7 @@ git clone --recurse-submodules https://github.com/pickle-prick/ink
 Within this terminal, `cd` to the root directory of the codebase, and just run the `build.sh` script:
 
 ```
-./build.sh ink clang release
+./build.sh ink clang release meta shader bake
 ```
 
 ### Windows Setup
@@ -63,7 +63,7 @@ Within this terminal, `cd` to the root directory of the codebase, and just run
 the `build.bat` script:
 
 ```
-build ink msvc release
+build ink msvc release shader meta bake
 ```
 
 ## Bug Report
@@ -77,7 +77,3 @@ Any issues/suggestions are appreciated
 
 Some known issues:
 * bad tablet support (I need to buy a tablet)
-* crashes on window resizing (in some cases)
-* can't copy/paste element
-* no redo/undo
-* crashes on startup (in some cases)
