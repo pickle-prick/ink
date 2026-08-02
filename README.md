@@ -1,7 +1,7 @@
 ink / A Native Whiteboard App
 ============
 
-![demo](./screenshot/1.png)
+![demo](./screenshot/3.png)
 
 
 > [!WARNING]
